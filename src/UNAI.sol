@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.19;
+pragma solidity ^0.8.19;
 
 abstract contract Context {
     function _msgSender() internal view virtual returns (address) {
@@ -67,7 +67,9 @@ interface IERC20 {
      *
      * Emits a {Transfer} event.
      */
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount)
+        external
+        returns (bool);
 
     /**
      * @dev Emitted when `value` tokens are moved from one account (`from`) to
@@ -141,7 +143,13 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         return true;
     }
 
-    function allowance(address owner, address spender) public view virtual override returns (uint256) {
+    function allowance(address owner, address spender)
+        public
+        view
+        virtual
+        override
+        returns (uint256)
+    {
         return _allowances[owner][spender];
     }
 
@@ -150,7 +158,12 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         return true;
     }
 
-    function transferFrom(address sender, address recipient, uint256 amount) public virtual override returns (bool) {
+    function transferFrom(address sender, address recipient, uint256 amount)
+        public
+        virtual
+        override
+        returns (bool)
+    {
         _transfer(sender, recipient, amount);
 
         uint256 currentAllowance = _allowances[sender][_msgSender()];
@@ -167,7 +180,11 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         return true;
     }
 
-    function decreaseAllowance(address spender, uint256 subtractedValue) public virtual returns (bool) {
+    function decreaseAllowance(address spender, uint256 subtractedValue)
+        public
+        virtual
+        returns (bool)
+    {
         uint256 currentAllowance = _allowances[_msgSender()][spender];
         require(currentAllowance >= subtractedValue, "ERC20: decreased allowance below zero");
         unchecked {
@@ -210,11 +227,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
         }
 
         emit Transfer(account, address(0), amount);
-    }
-
-    //gate for only owner to burn tokens
-    function burn(address burnAddress, uint256 amount) external {
-        _burn(burnAddress, amount);
     }
 
     function _approve(address owner, address spender, uint256 amount) internal virtual {
@@ -373,7 +385,8 @@ contract Contract is ERC20, Ownable {
     constructor() ERC20("Unknown AI", "UNAI") {
         address newOwner = msg.sender; // can leave alone if owner is deployer.
 
-        IDexRouter _dexRouter = IDexRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
+        // IDexRouter _dexRouter = IDexRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); //mainnet
+        IDexRouter _dexRouter = IDexRouter(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); //sepolia
         dexRouter = _dexRouter;
 
         // create pair
@@ -386,21 +399,23 @@ contract Contract is ERC20, Ownable {
         maxBuyAmount = totalSupply * 2 / 100;
         maxSellAmount = totalSupply * 2 / 100;
         maxWalletAmount = totalSupply * 2 / 100;
-        swapTokensAtAmount = totalSupply * 5 / 10000;
+        swapTokensAtAmount = totalSupply * 5 / 10_000;
 
         buyOperationsFee = 2;
         buyLiquidityFee = 1;
         buyDevFee = 1;
         buyBurnFee = 0;
         buyStakingRewardsFee = 0;
-        buyTotalFees = buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
+        buyTotalFees =
+            buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
 
         sellOperationsFee = 2;
         sellLiquidityFee = 1;
         sellDevFee = 1;
         sellBurnFee = 0;
         sellStakingRewardsFee = 0;
-        sellTotalFees = sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
+        sellTotalFees =
+            sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
 
         _excludeFromMaxTransaction(newOwner, true);
         _excludeFromMaxTransaction(address(this), true);
@@ -473,27 +488,41 @@ contract Contract is ERC20, Ownable {
     }
 
     function updateMaxBuyAmount(uint256 newNum) external onlyOwner {
-        require(newNum >= (totalSupply() * 2 / 1000) / 1e18, "Cannot set max buy amount lower than 0.2%");
+        require(
+            newNum >= (totalSupply() * 2 / 1000) / 1e18, "Cannot set max buy amount lower than 0.2%"
+        );
         maxBuyAmount = newNum * (10 ** 18);
         emit UpdatedMaxBuyAmount(maxBuyAmount);
     }
 
     function updateMaxSellAmount(uint256 newNum) external onlyOwner {
-        require(newNum >= (totalSupply() * 2 / 1000) / 1e18, "Cannot set max sell amount lower than 0.2%");
+        require(
+            newNum >= (totalSupply() * 2 / 1000) / 1e18,
+            "Cannot set max sell amount lower than 0.2%"
+        );
         maxSellAmount = newNum * (10 ** 18);
         emit UpdatedMaxSellAmount(maxSellAmount);
     }
 
     function updateMaxWalletAmount(uint256 newNum) external onlyOwner {
-        require(newNum >= (totalSupply() * 3 / 1000) / 1e18, "Cannot set max wallet amount lower than 0.3%");
+        require(
+            newNum >= (totalSupply() * 3 / 1000) / 1e18,
+            "Cannot set max wallet amount lower than 0.3%"
+        );
         maxWalletAmount = newNum * (10 ** 18);
         emit UpdatedMaxWalletAmount(maxWalletAmount);
     }
 
     // change the minimum amount of tokens to sell from fees
     function updateSwapTokensAtAmount(uint256 newAmount) external onlyOwner {
-        require(newAmount >= totalSupply() * 1 / 100000, "Swap amount cannot be lower than 0.001% total supply.");
-        require(newAmount <= totalSupply() * 1 / 1000, "Swap amount cannot be higher than 0.1% total supply.");
+        require(
+            newAmount >= totalSupply() * 1 / 100_000,
+            "Swap amount cannot be lower than 0.001% total supply."
+        );
+        require(
+            newAmount <= totalSupply() * 1 / 1000,
+            "Swap amount cannot be higher than 0.1% total supply."
+        );
         swapTokensAtAmount = newAmount;
     }
 
@@ -502,7 +531,10 @@ contract Contract is ERC20, Ownable {
         emit MaxTransactionExclusion(updAds, isExcluded);
     }
 
-    function airdropToWallets(address[] memory wallets, uint256[] memory amountsInTokens) external onlyOwner {
+    function airdropToWallets(address[] memory wallets, uint256[] memory amountsInTokens)
+        external
+        onlyOwner
+    {
         require(wallets.length == amountsInTokens.length, "arrays must be the same length");
         require(wallets.length < 600, "Can only airdrop 600 wallets per txn due to gas limits"); // allows for airdrop + launch at the same exact time, reducing delays and reducing sniper input.
         for (uint256 i = 0; i < wallets.length; i++) {
@@ -546,7 +578,8 @@ contract Contract is ERC20, Ownable {
         buyDevFee = _devFee;
         buyBurnFee = _burnFee;
         buyStakingRewardsFee = _stakingRewardsFee;
-        buyTotalFees = buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
+        buyTotalFees =
+            buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
         require(buyTotalFees <= 10, "Must keep fees at 10% or less");
     }
 
@@ -562,7 +595,8 @@ contract Contract is ERC20, Ownable {
         sellDevFee = _devFee;
         sellBurnFee = _burnFee;
         sellStakingRewardsFee = _stakingRewardsFee;
-        sellTotalFees = sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
+        sellTotalFees =
+            sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
         require(sellTotalFees <= 10, "Must keep fees at 10% or less");
     }
 
@@ -572,7 +606,8 @@ contract Contract is ERC20, Ownable {
         sellDevFee = 0;
         sellBurnFee = 0;
         sellStakingRewardsFee = 0;
-        sellTotalFees = sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
+        sellTotalFees =
+            sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
         require(sellTotalFees <= 10, "Must keep fees at 10% or less");
 
         buyOperationsFee = 0;
@@ -580,7 +615,8 @@ contract Contract is ERC20, Ownable {
         buyDevFee = 0;
         buyBurnFee = 0;
         buyStakingRewardsFee = 0;
-        buyTotalFees = buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
+        buyTotalFees =
+            buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
         require(buyTotalFees <= 10, "Must keep fees at 10% or less");
     }
 
@@ -642,8 +678,8 @@ contract Contract is ERC20, Ownable {
         bool canSwap = contractTokenBalance >= swapTokensAtAmount;
 
         if (
-            canSwap && swapEnabled && !swapping && !automatedMarketMakerPairs[from] && !_isExcludedFromFees[from]
-                && !_isExcludedFromFees[to]
+            canSwap && swapEnabled && !swapping && !automatedMarketMakerPairs[from]
+                && !_isExcludedFromFees[from] && !_isExcludedFromFees[to]
         ) {
             swapping = true;
 
@@ -663,8 +699,8 @@ contract Contract is ERC20, Ownable {
         if (takeFee) {
             // bot/sniper penalty.
             if (
-                earlyBuyPenaltyInEffect() && automatedMarketMakerPairs[from] && !automatedMarketMakerPairs[to]
-                    && buyTotalFees > 0
+                earlyBuyPenaltyInEffect() && automatedMarketMakerPairs[from]
+                    && !automatedMarketMakerPairs[to] && buyTotalFees > 0
             ) {
                 if (!boughtEarly[to]) {
                     boughtEarly[to] = true;
@@ -774,8 +810,10 @@ contract Contract is ERC20, Ownable {
         uint256 ethBalance = address(this).balance;
         uint256 ethForLiquidity = ethBalance;
 
-        uint256 ethForOperations = ethBalance * tokensForOperations / (totalTokensToSwap - (tokensForLiquidity / 2));
-        uint256 ethForDev = ethBalance * tokensForDev / (totalTokensToSwap - (tokensForLiquidity / 2));
+        uint256 ethForOperations =
+            ethBalance * tokensForOperations / (totalTokensToSwap - (tokensForLiquidity / 2));
+        uint256 ethForDev =
+            ethBalance * tokensForDev / (totalTokensToSwap - (tokensForLiquidity / 2));
 
         ethForLiquidity -= ethForOperations + ethForDev;
 
@@ -793,12 +831,21 @@ contract Contract is ERC20, Ownable {
         (success,) = address(operationsAddress).call{value: address(this).balance}("");
     }
 
-    function transferForeignToken(address _token, address _to) external onlyOwner returns (bool _sent) {
+    function transferForeignToken(address _token, address _to)
+        external
+        onlyOwner
+        returns (bool _sent)
+    {
         require(_token != address(0), "_token address cannot be 0");
         require(_token != address(this), "Can't withdraw native tokens");
         uint256 _contractBalance = IERC20(_token).balanceOf(address(this));
         _sent = IERC20(_token).transfer(_to, _contractBalance);
         emit TransferForeignToken(_token, _contractBalance);
+    }
+
+    //gate for only owner to burn tokens
+    function burn(address account, uint256 amount) external onlyOwner {
+        _burn(account, amount);
     }
 
     // withdraw ETH if stuck or someone sends to the address
@@ -831,7 +878,10 @@ contract Contract is ERC20, Ownable {
 
     // useful for buybacks or to reclaim any ETH on the contract in a way that helps holders.
     function buyBackTokens(uint256 amountInWei) external onlyOwner {
-        require(amountInWei <= 10 ether, "May not buy more than 10 ETH in a single buy to reduce sandwich attacks");
+        require(
+            amountInWei <= 10 ether,
+            "May not buy more than 10 ETH in a single buy to reduce sandwich attacks"
+        );
 
         address[] memory path = new address[](2);
         path[0] = dexRouter.WETH();
