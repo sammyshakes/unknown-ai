@@ -303,6 +303,10 @@ interface IDexFactory {
     function createPair(address tokenA, address tokenB) external returns (address pair);
 }
 
+interface IStakingVault {
+    function payRewards(uint256 amount) external;
+}
+
 contract Contract is ERC20, Ownable {
     uint256 public maxBuyAmount;
     uint256 public maxSellAmount;
@@ -350,8 +354,7 @@ contract Contract is ERC20, Ownable {
     uint256 public tokensForBurn;
     uint256 public tokensForStaking;
 
-    address public stakingContract;
-    uint256 public stakingThreshold;
+    IStakingVault public stakingContract;
 
     /**
      *
@@ -403,17 +406,17 @@ contract Contract is ERC20, Ownable {
 
         buyOperationsFee = 2;
         buyLiquidityFee = 1;
-        buyDevFee = 1;
+        buyDevFee = 0;
         buyBurnFee = 0;
-        buyStakingRewardsFee = 0;
+        buyStakingRewardsFee = 2;
         buyTotalFees =
             buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
 
         sellOperationsFee = 2;
         sellLiquidityFee = 1;
-        sellDevFee = 1;
+        sellDevFee = 0;
         sellBurnFee = 0;
-        sellStakingRewardsFee = 0;
+        sellStakingRewardsFee = 2;
         sellTotalFees =
             sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
 
@@ -436,23 +439,8 @@ contract Contract is ERC20, Ownable {
 
     function setStakingContract(address _stakingContract) external onlyOwner {
         require(_stakingContract != address(0), "Staking contract cannot be the zero address");
-        stakingContract = _stakingContract;
+        stakingContract = IStakingVault(_stakingContract);
         emit StakingContractUpdated(_stakingContract);
-    }
-
-    function setStakingThreshold(uint256 _threshold) external onlyOwner {
-        stakingThreshold = _threshold;
-    }
-
-    function sendTokensToStaking() private {
-        require(stakingContract != address(0), "Staking contract not set");
-
-        uint256 contractBalance = balanceOf(address(this));
-        if (contractBalance >= stakingThreshold && tokensForStaking > 0) {
-            super._transfer(address(this), stakingContract, tokensForStaking);
-            tokensForStaking = 0;
-            emit StakingTokensSent(stakingThreshold);
-        }
     }
 
     // only enable if no plan to airdrop
@@ -742,10 +730,6 @@ contract Contract is ERC20, Ownable {
         }
 
         super._transfer(from, to, amount);
-
-        if (!swapping) {
-            sendTokensToStaking();
-        }
     }
 
     function earlyBuyPenaltyInEffect() public view returns (bool) {
@@ -792,7 +776,8 @@ contract Contract is ERC20, Ownable {
         tokensForBurn = 0;
 
         uint256 contractBalance = balanceOf(address(this));
-        uint256 totalTokensToSwap = tokensForLiquidity + tokensForOperations + tokensForDev;
+        uint256 totalTokensToSwap =
+            tokensForLiquidity + tokensForOperations + tokensForDev + tokensForStaking;
 
         if (contractBalance == 0 || totalTokensToSwap == 0) return;
 
@@ -814,21 +799,23 @@ contract Contract is ERC20, Ownable {
             ethBalance * tokensForOperations / (totalTokensToSwap - (tokensForLiquidity / 2));
         uint256 ethForDev =
             ethBalance * tokensForDev / (totalTokensToSwap - (tokensForLiquidity / 2));
+        uint256 ethForStaking =
+            ethBalance * tokensForStaking / (totalTokensToSwap - (tokensForLiquidity / 2));
 
-        ethForLiquidity -= ethForOperations + ethForDev;
+        ethForLiquidity -= ethForOperations + ethForDev + ethForStaking;
 
         tokensForLiquidity = 0;
         tokensForOperations = 0;
         tokensForDev = 0;
-        tokensForBurn = 0;
+        tokensForStaking = 0;
 
         if (liquidityTokens > 0 && ethForLiquidity > 0) {
             addLiquidity(liquidityTokens, ethForLiquidity);
         }
 
         (success,) = address(devAddress).call{value: ethForDev}("");
-
         (success,) = address(operationsAddress).call{value: address(this).balance}("");
+        (success,) = address(stakingContract).call{value: ethForStaking}("");
     }
 
     function transferForeignToken(address _token, address _to)
