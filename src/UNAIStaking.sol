@@ -81,7 +81,6 @@ contract StakingVault is Ownable, ReentrancyGuard {
             return;
         }
 
-        uint256 timeElapsed = block.timestamp - pool.lastRewardTime;
         uint256 rewardAmount = pool.lastRewardBalance;
         if (rewardAmount > 0) {
             pool.accETHPerShare += (rewardAmount * 1e18) / tokenSupply;
