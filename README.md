@@ -4,15 +4,11 @@ This project implements a custom ERC20 token (UNAI), a staking vault, and a mark
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Project Structure](#project-structure)
 - [Running Tests](#running-tests)
 - [Contracts Overview](#contracts-overview)
-- [Contributing](#contributing)
-- [License](#license)
-
 
 ## Installation
 
