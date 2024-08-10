@@ -27,6 +27,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
     Pool[] public pools;
     mapping(address => mapping(uint256 => Stake[])) public stakes;
     mapping(address => address) public stakeApprovals;
+    mapping(address => bool) public authorizedMarketplaces;
 
     uint256 public totalStaked;
 
@@ -39,8 +40,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
         uint256 indexed poolId,
         uint256 indexed stakeId,
         uint256 stakedAmount,
-        uint256 rewardAmount,
-        uint256 totalAmount
+        uint256 rewardAmount
     );
     event RewardsDistributed(uint256 indexed poolId, uint256 totalRewards);
     event RewardsClaimed(
@@ -50,6 +50,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
     event StakeTransferred(
         address indexed from, address indexed to, uint256 indexed poolId, uint256 stakeId
     );
+    event MarketplaceAuthorizationSet(address indexed marketplace, bool isAuthorized);
 
     constructor(IERC20 _unaiToken) Ownable(msg.sender) {
         unaiToken = _unaiToken;
@@ -77,20 +78,37 @@ contract StakingVault is Ownable, ReentrancyGuard {
         uint256 tokenSupply = pool.totalStaked;
         if (tokenSupply == 0) {
             pool.lastRewardTime = block.timestamp;
-            if (isDistributing) {
-                pool.lastRewardBalance = 0;
-            }
             return;
         }
 
-        uint256 rewardAmount = pool.lastRewardBalance; // Only consider the last reward balance for this pool
-        pool.accETHPerShare += (rewardAmount * 1e18) / tokenSupply;
+        uint256 timeElapsed = block.timestamp - pool.lastRewardTime;
+        uint256 rewardAmount = pool.lastRewardBalance;
+        if (rewardAmount > 0) {
+            pool.accETHPerShare += (rewardAmount * 1e18) / tokenSupply;
+        }
         pool.lastRewardTime = block.timestamp;
 
         if (isDistributing) {
-            pool.lastRewardBalance = 0; // Reset the last reward balance after distributing
+            pool.lastRewardBalance = 0;
         }
+
+        // Debug: Log updated pool values
+        emit PoolUpdated(
+            poolId,
+            pool.accETHPerShare,
+            pool.totalStaked,
+            pool.lastRewardTime,
+            pool.lastRewardBalance
+        );
     }
+
+    event PoolUpdated(
+        uint256 indexed poolId,
+        uint256 accETHPerShare,
+        uint256 totalStaked,
+        uint256 lastRewardTime,
+        uint256 lastRewardBalance
+    );
 
     function distributeRewards() public payable {
         uint256 totalWeight = 0;
@@ -123,7 +141,8 @@ contract StakingVault is Ownable, ReentrancyGuard {
         );
 
         unaiToken.transferFrom(msg.sender, address(this), amount);
-        pool.totalStaked += amount;
+        pool.totalStaked += amount; // Update the total staked in the pool
+        totalStaked += amount; // Update the total staked in the contract
 
         emit Staked(msg.sender, poolId, stakes[msg.sender][poolId].length - 1, amount);
     }
@@ -148,26 +167,32 @@ contract StakingVault is Ownable, ReentrancyGuard {
         // Debug: Log intermediate values
         emit LogValues(accETHPerShare, amount, rewardDebt);
 
-        uint256 pending = (amount * accETHPerShare / 1e18) - rewardDebt;
+        uint256 pending = 0;
+        if (accETHPerShare > rewardDebt) {
+            pending = (amount * (accETHPerShare - rewardDebt)) / 1e18;
+        }
+
+        // Debug: Log calculated pending reward
+        emit CalculatedReward(pending);
 
         // Ensure pending rewards are non-negative
         require(pending >= 0, "Pending reward calculation resulted in underflow");
 
-        uint256 amountToTransfer = amount;
-
-        pool.totalStaked -= amount;
-        totalStaked -= amount;
+        pool.totalStaked -= amount; // Update the total staked in the pool
+        totalStaked -= amount; // Update the total staked in the contract
         delete stakes[msg.sender][poolId][stakeId];
 
-        unaiToken.transfer(msg.sender, amountToTransfer);
+        unaiToken.transfer(msg.sender, amount);
 
         if (pending > 0) {
             (bool success,) = msg.sender.call{value: pending}("");
             require(success, "ETH transfer failed");
         }
 
-        emit Unstaked(msg.sender, poolId, stakeId, amount, pending, amountToTransfer);
+        emit Unstaked(msg.sender, poolId, stakeId, amount, pending);
     }
+
+    event CalculatedReward(uint256 pending);
 
     event LogValues(uint256 accETHPerShare, uint256 amount, uint256 rewardDebt);
 
@@ -205,22 +230,13 @@ contract StakingVault is Ownable, ReentrancyGuard {
         return pending;
     }
 
-    function approveStakeTransfer(address to, uint256 poolId, uint256 stakeId)
-        external
-        nonReentrant
-    {
-        Stake storage userStake = stakes[msg.sender][poolId][stakeId];
-        require(userStake.owner == msg.sender, "Not the owner of this stake");
-        stakeApprovals[msg.sender] = to;
-    }
+    function transferStake(address from, address to, uint256 poolId, uint256 stakeId) external {
+        require(authorizedMarketplaces[msg.sender], "Caller is not an authorized marketplace");
 
-    function transferStake(address from, address to, uint256 poolId, uint256 stakeId)
-        external
-        nonReentrant
-    {
-        require(stakeApprovals[from] == msg.sender, "Not approved for transfer");
         Stake storage fromStake = stakes[from][poolId][stakeId];
         require(fromStake.owner == from, "Not the owner of this stake");
+
+        updatePool(poolId, false);
 
         Stake memory newStake = fromStake;
         newStake.owner = to; // Update the owner of the new stake
@@ -244,6 +260,14 @@ contract StakingVault is Ownable, ReentrancyGuard {
         // Calculate APY
         uint256 apy = (annualizedRewardsPerShare * 100) / 1e18;
         return apy;
+    }
+
+    function setMarketplaceAuthorization(address marketplace, bool isAuthorized)
+        external
+        onlyOwner
+    {
+        authorizedMarketplaces[marketplace] = isAuthorized;
+        emit MarketplaceAuthorizationSet(marketplace, isAuthorized);
     }
 
     receive() external payable {

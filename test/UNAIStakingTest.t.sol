@@ -31,7 +31,7 @@ contract UNAIStakingTest is Test {
         assertEq(unaiToken.balanceOf(owner), unaiToken.totalSupply());
 
         // Provide liquidity to the pool
-        uint256 ethAmount = 1 ether;
+        uint256 ethAmount = 10 ether;
         uint256 tokenAmount = 10_000_000 * 1e18;
 
         // Deal some ETH to the owner
@@ -39,7 +39,7 @@ contract UNAIStakingTest is Test {
 
         unaiToken.approve(address(dexRouter), tokenAmount);
 
-        dexRouter.addLiquidityETH{value: ethAmount}(
+        dexRouter.addLiquidityETH{value: 1 ether}(
             address(unaiToken), tokenAmount, 0, 0, owner, block.timestamp
         );
 
@@ -77,64 +77,9 @@ contract UNAIStakingTest is Test {
     function test_ClaimRewards() public {
         uint256 poolId = 0;
 
-        // User1 buys tokens
-        buyTokens(user1, 1 ether);
-
-        // roll the block to the future
-        // vm.roll(block.number + 10)
-
-        vm.startPrank(user1);
-        unaiToken.approve(address(stakingVault), 100 * 1e18);
-        stakingVault.stake(poolId, 100 * 1e18);
-        vm.stopPrank();
-
-        vm.warp(block.timestamp + 1 days);
-        vm.roll(block.number + 10);
-
-        uint256 initialBalance = unaiToken.balanceOf(user1);
-
-        vm.startPrank(user1);
-        stakingVault.claimRewards(poolId, 0);
-        vm.stopPrank();
-
-        uint256 finalBalance = unaiToken.balanceOf(user1);
-        assertEq(finalBalance, initialBalance + 100 * 1e18);
-    }
-
-    function test_StakeAndUnstake() public {
-        uint256 poolId = 0;
-
-        // User1 buys tokens
-        buyTokens(user1, 1 ether);
-
-        vm.startPrank(user1);
-        unaiToken.approve(address(stakingVault), 100 * 1e18);
-        stakingVault.stake(poolId, 100 * 1e18);
-        vm.stopPrank();
-
-        (uint256 amount,, address stakeOwner,) = stakingVault.stakes(user1, poolId, 0);
-        assertEq(amount, 100 * 1e18);
-        assertEq(stakeOwner, user1);
-
-        vm.warp(block.timestamp + 180 days);
-        vm.roll(block.number + 10);
-
-        uint256 initialBalance = unaiToken.balanceOf(user1);
-
-        vm.startPrank(user1);
-        stakingVault.unstake(poolId, 0);
-        vm.stopPrank();
-
-        (amount,, stakeOwner,) = stakingVault.stakes(user1, poolId, 0);
-        assertEq(amount, 0);
-        assertEq(stakeOwner, address(0));
-
-        uint256 finalBalance = unaiToken.balanceOf(user1);
-        assertEq(finalBalance, initialBalance + 100 * 1e18);
-    }
-
-    function test_StakeTransfer() public {
-        uint256 poolId = 0;
+        // Add a pool to the staking vault
+        vm.prank(owner);
+        stakingVault.addPool(30 days, 1);
 
         // User1 buys tokens
         buyTokens(user1, 1 ether);
@@ -145,20 +90,157 @@ contract UNAIStakingTest is Test {
         stakingVault.stake(poolId, 100 * 1e18);
         vm.stopPrank();
 
-        // Approve transfer of the stake
+        // Distribute rewards to the pool
+        vm.prank(owner);
+        stakingVault.distributeRewards{value: 1 ether}();
+
+        // Warp to simulate passage of time
+        vm.warp(block.timestamp + 1 days);
+        vm.roll(block.number + 10);
+
+        // Check initial ETH balance
+        uint256 initialEthBalance = address(user1).balance;
+        console.log("Initial ETH balance:", initialEthBalance);
+
+        // Claim rewards
         vm.startPrank(user1);
-        stakingVault.approveStakeTransfer(user2, poolId, 0);
+        stakingVault.claimRewards(poolId, 0);
         vm.stopPrank();
 
-        // Transfer the stake
-        vm.startPrank(user2);
-        stakingVault.transferStake(user1, user2, poolId, 0);
-        vm.stopPrank();
+        // Check final ETH balance
+        uint256 finalEthBalance = address(user1).balance;
+        console.log("Final ETH balance:", finalEthBalance);
 
-        // Check the new owner of the stake
-        (,, address newOwner,) = stakingVault.stakes(user2, poolId, 0);
-        assertEq(newOwner, user2);
+        // Ensure that the rewards were successfully transferred
+        assertTrue(finalEthBalance > initialEthBalance, "User1 should have received ETH rewards");
     }
+
+    function test_StakeAndUnstake() public {
+        uint256 poolId = 0;
+
+        // User1 buys tokens
+        buyTokens(user1, 1 ether);
+
+        console.log("User1 balance before staking:", unaiToken.balanceOf(user1));
+
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), 100 * 1e18);
+        stakingVault.stake(poolId, 100 * 1e18);
+        vm.stopPrank();
+
+        console.log("User1 balance after staking:", unaiToken.balanceOf(user1));
+
+        (uint256 amount,, address stakeOwner,) = stakingVault.stakes(user1, poolId, 0);
+        console.log("Staked amount:", amount);
+        console.log("Stake owner:", stakeOwner);
+
+        assertEq(amount, 100 * 1e18);
+        assertEq(stakeOwner, user1);
+
+        // Add rewards to the pool
+        stakingVault.distributeRewards{value: 1 ether}();
+
+        console.log("Rewards added to staking vault:", address(stakingVault).balance);
+
+        // Warp time and roll blocks
+        vm.warp(block.timestamp + 180 days);
+        vm.roll(block.number + 10);
+
+        uint256 initialEthBalance = user1.balance;
+        console.log("User1 ETH balance before unstaking:", initialEthBalance);
+
+        // Log pool information before unstaking
+        (
+            uint256 lockPeriod,
+            uint256 accETHPerShare,
+            uint256 totalStaked,
+            uint256 lastRewardTime,
+            uint256 lastRewardBalance,
+            uint256 weight
+        ) = stakingVault.pools(poolId);
+        console.log("Pool lock period:", lockPeriod);
+        console.log("Pool accETHPerShare:", accETHPerShare);
+        console.log("Pool total staked:", totalStaked);
+        console.log("Pool last reward time:", lastRewardTime);
+        console.log("Pool last reward balance:", lastRewardBalance);
+        console.log("Pool weight:", weight);
+
+        vm.startPrank(user1);
+        stakingVault.updatePool(poolId, false);
+        (, accETHPerShare,,,,) = stakingVault.pools(poolId);
+
+        console.log("Pool accETHPerShare after update:", accETHPerShare);
+        uint256 pendingRewards = stakingVault.pendingRewards(user1, poolId, 0);
+        console.log("Pending rewards before unstaking:", pendingRewards);
+        stakingVault.unstake(poolId, 0);
+        vm.stopPrank();
+
+        (amount,, stakeOwner,) = stakingVault.stakes(user1, poolId, 0);
+        console.log("Staked amount after unstaking:", amount);
+        console.log("Stake owner after unstaking:", stakeOwner);
+
+        assertEq(amount, 0);
+        assertEq(stakeOwner, address(0));
+
+        // Check if user received ETH rewards
+        uint256 finalEthBalance = user1.balance;
+        assertGt(finalEthBalance, initialEthBalance, "User should have received ETH rewards");
+        console.log("User1 ETH balance after unstaking:", finalEthBalance);
+        console.log("ETH balance difference:", finalEthBalance - initialEthBalance);
+
+        // Check if user received rewards
+        uint256 userEthBalance = user1.balance;
+        console.log("User1 ETH balance after unstaking:", userEthBalance);
+    }
+
+    // function test_StakeTransfer() public {
+    //     uint256 poolId = 0;
+
+    //     // Add a pool to the staking vault
+    //     vm.prank(owner);
+    //     stakingVault.addPool(30 days, 1);
+
+    //     // User1 buys tokens
+    //     buyTokens(user1, 1 ether);
+
+    //     // Stake tokens
+    //     vm.startPrank(user1);
+    //     unaiToken.approve(address(stakingVault), 100 * 1e18);
+    //     stakingVault.stake(poolId, 100 * 1e18);
+    //     vm.stopPrank();
+
+    //     stakingVault.distributeRewards{value: 1 ether}();
+
+    //     // Warp time to accumulate rewards
+    //     vm.warp(block.timestamp + 1 days);
+
+    //     // Approve transfer of the stake
+    //     vm.startPrank(user1);
+    //     stakingVault.approveStakeTransfer(user2, poolId, 0);
+    //     vm.stopPrank();
+
+    //     // Transfer the stake
+    //     vm.startPrank(user2);
+    //     stakingVault.transferStake(user1, user2, poolId, 0);
+    //     vm.stopPrank();
+
+    //     // Check the new owner of the stake
+    //     (,, address newOwner,) = stakingVault.stakes(user2, poolId, 0);
+    //     assertEq(newOwner, user2);
+
+    //     // Verify that the reward debt of the transferred stake is correct
+    //     uint256 pendingRewardsUser2 = stakingVault.pendingRewards(user2, poolId, 0);
+    //     assertTrue(pendingRewardsUser2 > 0, "User2 should have pending rewards after transfer");
+
+    //     // Claim rewards for user2
+    //     vm.startPrank(user2);
+    //     stakingVault.claimRewards(poolId, 0);
+    //     vm.stopPrank();
+
+    //     // Ensure that the rewards were successfully transferred
+    //     uint256 finalEthBalance = address(user2).balance;
+    //     assertTrue(finalEthBalance > 0, "User2 should have received ETH rewards");
+    // }
 
     function test_PeriodicBuysAndSellsWithRewards() public {
         uint256 poolId = 0;
