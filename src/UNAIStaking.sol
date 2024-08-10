@@ -91,24 +91,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
         if (isDistributing) {
             pool.lastRewardBalance = 0;
         }
-
-        // Debug: Log updated pool values
-        emit PoolUpdated(
-            poolId,
-            pool.accETHPerShare,
-            pool.totalStaked,
-            pool.lastRewardTime,
-            pool.lastRewardBalance
-        );
     }
-
-    event PoolUpdated(
-        uint256 indexed poolId,
-        uint256 accETHPerShare,
-        uint256 totalStaked,
-        uint256 lastRewardTime,
-        uint256 lastRewardBalance
-    );
 
     function distributeRewards() public payable {
         uint256 totalWeight = 0;
@@ -164,16 +147,10 @@ contract StakingVault is Ownable, ReentrancyGuard {
         uint256 accETHPerShare = pool.accETHPerShare;
         uint256 rewardDebt = userStake.rewardDebt;
 
-        // Debug: Log intermediate values
-        emit LogValues(accETHPerShare, amount, rewardDebt);
-
         uint256 pending = 0;
         if (accETHPerShare > rewardDebt) {
             pending = (amount * (accETHPerShare - rewardDebt)) / 1e18;
         }
-
-        // Debug: Log calculated pending reward
-        emit CalculatedReward(pending);
 
         // Ensure pending rewards are non-negative
         require(pending >= 0, "Pending reward calculation resulted in underflow");
@@ -191,10 +168,6 @@ contract StakingVault is Ownable, ReentrancyGuard {
 
         emit Unstaked(msg.sender, poolId, stakeId, amount, pending);
     }
-
-    event CalculatedReward(uint256 pending);
-
-    event LogValues(uint256 accETHPerShare, uint256 amount, uint256 rewardDebt);
 
     function claimRewards(uint256 poolId, uint256 stakeId) external nonReentrant {
         Stake storage userStake = stakes[msg.sender][poolId][stakeId];
