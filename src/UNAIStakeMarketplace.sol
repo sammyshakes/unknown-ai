@@ -152,15 +152,11 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     }
 
     function updateDexRouter(address _dexRouter) external onlyOwner {
-        dexRouter = IDEXRouter(_dexRouter);
-    }
-
-    function updateWETH(address _WETH) external onlyWETHner {
-        WETH = _WETH;
+        dexRouter = IDexRouter(_dexRouter);
+        wethAddress = dexRouter.WETH(); // Update WETH address when router is updated
     }
 
     // View functions
-
     function getListing(uint256 listingId)
         external
         view
@@ -246,9 +242,9 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
 
         address[] memory path = new address[](2);
         path[0] = address(paymentToken);
-        path[1] = WETH;
+        path[1] = wethAddress;
 
-        dexRouter.swapExactTokensForETH(
+        dexRouter.swapExactTokensForETHSupportingFeeOnTransferTokens(
             tokenAmount,
             0, // Accept any amount of ETH
             path,

@@ -13,9 +13,10 @@ contract Deploy is Script {
 
     uint256 deployerPrivateKey = uint256(vm.envBytes32("DEPLOYER_PRIVATE_KEY"));
 
-    // You'll need to set these addresses for the network you're deploying to
-    address constant DEX_ROUTER = address(0x1234...); // Replace with actual DEX router address
-    address constant WETH = address(0x5678...); // Replace with actual WETH address
+    // You'll need to set this address for the network you're deploying to
+    address constant DEX_ROUTER = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008);
+    // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D //mainnet
+    // 0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008 //sepolia
 
     function setUp() public {}
 
@@ -33,8 +34,9 @@ contract Deploy is Script {
         // Set the staking contract in the UNAI token contract
         unaiToken.setStakingContract(address(stakingVault));
 
-        // Deploy UNAIStakeMarketplace contract with DEX router and WETH addresses
-        marketplace = new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER, WETH);
+        // Deploy UNAIStakeMarketplace contract with DEX router address
+        marketplace =
+            new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER);
         console.log("UNAIStakeMarketplace deployed at:", address(marketplace));
 
         // Authorize the marketplace in the staking contract
