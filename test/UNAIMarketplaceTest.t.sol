@@ -5,22 +5,33 @@ import "forge-std/Test.sol";
 import "forge-std/console.sol";
 import {Contract} from "../src/UNAI.sol";
 import "../src/UNAIStaking.sol";
-import "../src/UNAIStakeMarketplace.sol";
+import {UNAIStakeMarketplace, IDEXRouter} from "../src/UNAIStakeMarketplace.sol";
+
+interface IWETH {
+    function deposit() external payable;
+    function transfer(address to, uint256 value) external returns (bool);
+}
 
 contract StakeMarketplaceTest is Test {
     StakingVault public stakingVault;
     Contract public unaiToken;
     UNAIStakeMarketplace public marketplace;
+    IWETH public weth;
+    IDEXRouter public dexRouter;
 
     address public owner = address(this);
     address public user1 = address(0x1);
     address public user2 = address(0x2);
+    address public constant DEX_ROUTER = 0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008;
 
     function setUp() public {
         console.log("Setting up test environment...");
         unaiToken = new Contract();
         stakingVault = new StakingVault(IERC20(address(unaiToken)));
-        marketplace = new UNAIStakeMarketplace(address(stakingVault), address(unaiToken));
+        marketplace =
+            new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER);
+        dexRouter = IDEXRouter(DEX_ROUTER);
+        weth = IWETH(dexRouter.WETH());
 
         unaiToken.setStakingContract(address(stakingVault));
         stakingVault.setMarketplaceAuthorization(address(marketplace), true);
@@ -34,12 +45,25 @@ contract StakeMarketplaceTest is Test {
 
         vm.roll(block.number + 2);
 
-        // Mint tokens to users
-        unaiToken.transfer(user1, 1000 * 1e18);
-        unaiToken.transfer(user2, 1000 * 1e18);
+        // Mint tokens to users and add liquidity
+        uint256 initialTokenAmount = 1_000_000 * 1e18;
+        unaiToken.transfer(user1, initialTokenAmount);
+        unaiToken.transfer(user2, initialTokenAmount);
+        addLiquidity(initialTokenAmount, 1000 ether);
+
         console.log("Test environment set up complete.");
         console.log("User1 balance:", unaiToken.balanceOf(user1) / 1e18);
         console.log("User2 balance:", unaiToken.balanceOf(user2) / 1e18);
+
+        // Fund the marketplace with ETH
+        vm.deal(address(marketplace), 100 ether);
+    }
+
+    function addLiquidity(uint256 tokenAmount, uint256 ethAmount) internal {
+        unaiToken.approve(DEX_ROUTER, tokenAmount);
+        dexRouter.addLiquidityETH{value: ethAmount}(
+            address(unaiToken), tokenAmount, 0, 0, address(this), block.timestamp
+        );
     }
 
     function testCreateListing() public {
@@ -108,8 +132,8 @@ contract StakeMarketplaceTest is Test {
         assertFalse(fulfilled);
     }
 
-    function testFulfillListing() public {
-        console.log("Testing fulfill listing...");
+    function testFulfillListingWithFee() public {
+        console.log("Testing fulfill listing with fee...");
         uint256 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
         uint256 listingPrice = 150 * 1e18;
@@ -121,6 +145,11 @@ contract StakeMarketplaceTest is Test {
         stakingVault.stake(poolId, stakeAmount);
         marketplace.createListing(poolId, 0, listingPrice);
         vm.stopPrank();
+
+        // Record initial balances
+        uint256 initialUser1Balance = unaiToken.balanceOf(user1);
+        uint256 initialUser2Balance = unaiToken.balanceOf(user2);
+        uint256 initialMarketplaceEthBalance = address(marketplace).balance;
 
         // User2 fulfills the listing
         vm.startPrank(user2);
@@ -143,11 +172,27 @@ contract StakeMarketplaceTest is Test {
         assertFalse(active);
         assertTrue(fulfilled);
 
-        // Check if payment was transferred
+        // Check if payment was transferred correctly
+        uint256 fee = (listingPrice * marketplace.marketplaceFee()) / 10_000;
+        uint256 sellerAmount = listingPrice - fee;
+
         console.log("User1 balance after sale:", unaiToken.balanceOf(user1) / 1e18);
         console.log("User2 balance after purchase:", unaiToken.balanceOf(user2) / 1e18);
-        assertEq(unaiToken.balanceOf(user1), 1050 * 1e18);
-        assertEq(unaiToken.balanceOf(user2), 850 * 1e18);
+        console.log("Marketplace ETH balance after sale:", address(marketplace).balance / 1e18);
+
+        assertEq(unaiToken.balanceOf(user1), initialUser1Balance + sellerAmount);
+        assertEq(unaiToken.balanceOf(user2), initialUser2Balance - listingPrice);
+
+        // The marketplace's ETH balance should have increased due to the fee swap
+        assertTrue(address(marketplace).balance > initialMarketplaceEthBalance);
+    }
+
+    function testSetMarketplaceFee() public {
+        console.log("Testing set marketplace fee...");
+        uint256 newFee = 200; // 2%
+        marketplace.setMarketplaceFee(newFee);
+        assertEq(marketplace.marketplaceFee(), newFee);
+        console.log("New marketplace fee set:", newFee);
     }
 
     function testGetActiveListings() public {
@@ -194,11 +239,10 @@ contract StakeMarketplaceTest is Test {
         // User1 stakes tokens and creates listings
         vm.startPrank(user1);
         console.log("User1 staking tokens and creating listings...");
-        unaiToken.approve(address(stakingVault), stakeAmount);
+        unaiToken.approve(address(stakingVault), stakeAmount * 2);
         stakingVault.stake(poolId, stakeAmount);
         marketplace.createListing(poolId, 0, listingPrice);
 
-        unaiToken.approve(address(stakingVault), stakeAmount);
         stakingVault.stake(poolId, stakeAmount);
         marketplace.createListing(poolId, 1, listingPrice);
         vm.stopPrank();
@@ -318,4 +362,23 @@ contract StakeMarketplaceTest is Test {
         marketplace.updatePaymentToken(address(0x456));
         console.log("Unauthorized payment token update reverted as expected.");
     }
+
+    function testWithdrawETH() public {
+        console.log("Testing withdraw ETH...");
+
+        // First, we need to ensure there's some ETH in the contract
+        uint256 amount = 1 ether;
+        vm.deal(address(marketplace), amount);
+
+        uint256 initialOwnerBalance = address(this).balance;
+        uint256 initialMarketplaceBalance = address(marketplace).balance;
+
+        marketplace.withdrawETH();
+
+        assertEq(address(marketplace).balance, 0);
+        assertEq(address(this).balance, initialOwnerBalance + initialMarketplaceBalance);
+        console.log("ETH withdrawn successfully.");
+    }
+
+    receive() external payable {}
 }

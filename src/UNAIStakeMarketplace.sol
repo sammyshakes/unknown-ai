@@ -30,6 +30,15 @@ interface IDEXRouter {
         address to,
         uint256 deadline
     ) external;
+
+    function addLiquidityETH(
+        address token,
+        uint256 amountTokenDesired,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
+        address to,
+        uint256 deadline
+    ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
 }
 
 contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
@@ -149,11 +158,6 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
 
     function updatePaymentToken(address _paymentToken) external onlyOwner {
         paymentToken = IERC20(_paymentToken);
-    }
-
-    function updateDexRouter(address _dexRouter) external onlyOwner {
-        dexRouter = IDexRouter(_dexRouter);
-        wethAddress = dexRouter.WETH(); // Update WETH address when router is updated
     }
 
     // View functions
