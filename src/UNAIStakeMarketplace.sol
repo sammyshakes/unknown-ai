@@ -20,20 +20,23 @@ interface IStakingVault {
 }
 
 interface IDEXRouter {
-    function swapExactTokensForETH(
+    function factory() external pure returns (address);
+    function WETH() external pure returns (address);
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
         uint256 amountIn,
         uint256 amountOutMin,
         address[] calldata path,
         address to,
         uint256 deadline
-    ) external returns (uint256[] memory amounts);
+    ) external;
 }
 
 contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     IStakingVault public stakingVault;
     IERC20 public paymentToken;
     IDEXRouter public dexRouter;
-    address public WETH;
+    address public wethAddress;
 
     uint256 public marketplaceFee; // Fee in basis points (e.g., 100 = 1%)
 
@@ -61,14 +64,14 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     event ListingUpdated(uint256 indexed listingId, uint256 newPrice);
     event MarketplaceFeeUpdated(uint256 newFee);
 
-    constructor(address _stakingVault, address _paymentToken, address _dexRouter, address _WETH)
+    constructor(address _stakingVault, address _paymentToken, address _dexRouter)
         Ownable(msg.sender)
     {
         stakingVault = IStakingVault(_stakingVault);
         paymentToken = IERC20(_paymentToken);
         dexRouter = IDEXRouter(_dexRouter);
-        WETH = _WETH;
-        marketplaceFee = 100; // Default 1% fee
+        wethAddress = dexRouter.WETH();
+        marketplaceFee = 400;
     }
 
     function setMarketplaceFee(uint256 _fee) external onlyOwner {
@@ -111,12 +114,22 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         listing.active = false;
         listing.fulfilled = true;
 
+        uint256 feeAmount = (listing.price * marketplaceFee) / 10_000;
+        uint256 sellerAmount = listing.price - feeAmount;
+
         require(
-            paymentToken.transferFrom(msg.sender, listing.seller, listing.price),
+            paymentToken.transferFrom(msg.sender, address(this), listing.price),
             "Payment transfer failed"
         );
 
+        require(
+            paymentToken.transfer(listing.seller, sellerAmount), "Seller payment transfer failed"
+        );
+
         stakingVault.transferStake(listing.seller, msg.sender, listing.poolId, listing.stakeId);
+
+        // Swap fee tokens for ETH
+        swapTokensForEth(feeAmount);
 
         emit ListingFulfilled(listingId, msg.sender);
     }
@@ -136,6 +149,14 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
 
     function updatePaymentToken(address _paymentToken) external onlyOwner {
         paymentToken = IERC20(_paymentToken);
+    }
+
+    function updateDexRouter(address _dexRouter) external onlyOwner {
+        dexRouter = IDEXRouter(_dexRouter);
+    }
+
+    function updateWETH(address _WETH) external onlyWETHner {
+        WETH = _WETH;
     }
 
     // View functions
@@ -219,4 +240,31 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         }
         return sellerListings;
     }
+
+    function swapTokensForEth(uint256 tokenAmount) internal {
+        require(paymentToken.approve(address(dexRouter), tokenAmount), "Approve failed");
+
+        address[] memory path = new address[](2);
+        path[0] = address(paymentToken);
+        path[1] = WETH;
+
+        dexRouter.swapExactTokensForETH(
+            tokenAmount,
+            0, // Accept any amount of ETH
+            path,
+            address(this),
+            block.timestamp + 15 minutes
+        );
+    }
+
+    // Function to withdraw accumulated ETH
+    function withdrawETH() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No ETH to withdraw");
+        (bool success,) = msg.sender.call{value: balance}("");
+        require(success, "ETH transfer failed");
+    }
+
+    // Function to receive ETH
+    receive() external payable {}
 }

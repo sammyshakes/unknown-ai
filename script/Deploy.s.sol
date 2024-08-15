@@ -13,6 +13,10 @@ contract Deploy is Script {
 
     uint256 deployerPrivateKey = uint256(vm.envBytes32("DEPLOYER_PRIVATE_KEY"));
 
+    // You'll need to set these addresses for the network you're deploying to
+    address constant DEX_ROUTER = address(0x1234...); // Replace with actual DEX router address
+    address constant WETH = address(0x5678...); // Replace with actual WETH address
+
     function setUp() public {}
 
     function run() public {
@@ -29,8 +33,8 @@ contract Deploy is Script {
         // Set the staking contract in the UNAI token contract
         unaiToken.setStakingContract(address(stakingVault));
 
-        // Deploy UNAIStakeMarketplace contract
-        marketplace = new UNAIStakeMarketplace(address(stakingVault), address(unaiToken));
+        // Deploy UNAIStakeMarketplace contract with DEX router and WETH addresses
+        marketplace = new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER, WETH);
         console.log("UNAIStakeMarketplace deployed at:", address(marketplace));
 
         // Authorize the marketplace in the staking contract
