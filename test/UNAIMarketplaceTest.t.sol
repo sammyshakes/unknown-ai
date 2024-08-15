@@ -68,7 +68,8 @@ contract StakeMarketplaceTest is Test {
 
     function testCreateListingWithTimestamp() public {
         console.log("Testing create listing with timestamp...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
+        uint8 stakeId = 0;
         uint256 stakeAmount = 100 * 1e18;
 
         // User1 stakes tokens
@@ -81,22 +82,22 @@ contract StakeMarketplaceTest is Test {
         // User1 creates a listing
         console.log("User1 creating listing...");
         uint256 listingTimestamp = block.timestamp;
-        marketplace.createListing(poolId, 0, 150 * 1e18);
+        marketplace.createListing(poolId, stakeId, 150 * 1e18);
         vm.stopPrank();
 
         // Check if listing was created correctly
         (
-            address seller,
-            uint256 listedPoolId,
-            uint256 stakeId,
-            uint256 price,
+            uint8 listedPoolId,
+            uint8 listedStakeId,
             bool active,
             bool fulfilled,
+            address seller,
+            uint256 price,
             uint256 timestamp
         ) = marketplace.listings(0);
         console.log("Listing created. Seller:", seller);
         console.log("Listed Pool ID:", listedPoolId);
-        console.log("Stake ID:", stakeId);
+        console.log("Stake ID:", listedStakeId);
         console.log("Price:", price / 1e18);
         console.log("Active:", active);
         console.log("Fulfilled:", fulfilled);
@@ -104,7 +105,7 @@ contract StakeMarketplaceTest is Test {
 
         assertEq(seller, user1);
         assertEq(listedPoolId, poolId);
-        assertEq(stakeId, 0);
+        assertEq(listedStakeId, stakeId);
         assertEq(price, 150 * 1e18);
         assertTrue(active);
         assertFalse(fulfilled);
@@ -113,7 +114,7 @@ contract StakeMarketplaceTest is Test {
 
     function testCancelListing() public {
         console.log("Testing cancel listing...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
 
         // User1 stakes tokens and creates a listing
@@ -138,7 +139,8 @@ contract StakeMarketplaceTest is Test {
 
     function testFulfillListingWithFee() public {
         console.log("Testing fulfill listing with fee...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
+        uint8 stakeId = 0;
         uint256 stakeAmount = 100 * 1e18;
         uint256 listingPrice = 150 * 1e18;
 
@@ -147,7 +149,7 @@ contract StakeMarketplaceTest is Test {
         console.log("User1 staking tokens and creating listing...");
         unaiToken.approve(address(stakingVault), stakeAmount);
         stakingVault.stake(poolId, stakeAmount);
-        marketplace.createListing(poolId, 0, listingPrice);
+        marketplace.createListing(poolId, stakeId, listingPrice);
         vm.stopPrank();
 
         // Record initial balances
@@ -163,11 +165,11 @@ contract StakeMarketplaceTest is Test {
         vm.stopPrank();
 
         // Check if listing was fulfilled and stake was transferred
-        (,,,, bool active, bool fulfilled) = marketplace.getListing(0);
+        (,, bool active, bool fulfilled,,,) = marketplace.listings(0);
         console.log("Listing active status after fulfillment:", active);
         console.log("Listing fulfilled status after fulfillment:", fulfilled);
 
-        (uint256 amount,, address stakeOwner,) = stakingVault.stakes(user2, poolId, 0);
+        (uint256 amount,, address stakeOwner,) = stakingVault.stakes(user2, poolId, stakeId);
         console.log("New stake owner:", stakeOwner);
         console.log("Stake amount:", amount / 1e18);
 
@@ -201,7 +203,7 @@ contract StakeMarketplaceTest is Test {
 
     function testGetActiveListings() public {
         console.log("Testing get active listings...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
 
         // User1 stakes tokens and creates listings
@@ -236,7 +238,7 @@ contract StakeMarketplaceTest is Test {
 
     function testGetFulfilledListings() public {
         console.log("Testing get fulfilled listings...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
         uint256 listingPrice = 150 * 1e18;
 
@@ -278,7 +280,7 @@ contract StakeMarketplaceTest is Test {
 
     function testUnauthorizedListingCreation() public {
         console.log("Testing unauthorized listing creation...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
 
         // User2 tries to create a listing for a stake they don't own
         vm.prank(user2);
@@ -290,7 +292,7 @@ contract StakeMarketplaceTest is Test {
 
     function testUnauthorizedListingCancellation() public {
         console.log("Testing unauthorized listing cancellation...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
 
         // User1 stakes tokens and creates a listing
@@ -311,7 +313,7 @@ contract StakeMarketplaceTest is Test {
 
     function testFulfillInactiveListing() public {
         console.log("Testing fulfill inactive listing...");
-        uint256 poolId = 0;
+        uint8 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
 
         // User1 stakes tokens and creates a listing

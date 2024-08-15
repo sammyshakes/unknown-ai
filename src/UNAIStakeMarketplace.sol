@@ -41,12 +41,12 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     uint256 public marketplaceFee; // Fee in basis points (e.g., 100 = 1%)
 
     struct Listing {
-        address seller;
-        uint256 poolId;
-        uint256 stakeId;
-        uint256 price;
+        uint8 poolId;
+        uint8 stakeId;
         bool active;
         bool fulfilled;
+        address seller;
+        uint256 price;
         uint256 timestamp;
     }
 
@@ -56,8 +56,8 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     event ListingCreated(
         uint256 indexed listingId,
         address indexed seller,
-        uint256 poolId,
-        uint256 stakeId,
+        uint8 poolId,
+        uint8 stakeId,
         uint256 price,
         uint256 timestamp
     );
@@ -82,18 +82,18 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         emit MarketplaceFeeUpdated(_fee);
     }
 
-    function createListing(uint256 poolId, uint256 stakeId, uint256 price) external nonReentrant {
+    function createListing(uint8 poolId, uint8 stakeId, uint256 price) external nonReentrant {
         (,, address owner,) = stakingVault.stakes(msg.sender, poolId, stakeId);
         require(owner == msg.sender, "Not the owner of this stake");
 
         uint256 listingId = nextListingId++;
         listings[listingId] = Listing({
-            seller: msg.sender,
             poolId: poolId,
             stakeId: stakeId,
-            price: price,
             active: true,
             fulfilled: false,
+            seller: msg.sender,
+            price: price,
             timestamp: block.timestamp
         });
 
