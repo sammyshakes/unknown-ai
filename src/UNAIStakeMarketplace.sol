@@ -30,15 +30,6 @@ interface IDEXRouter {
         address to,
         uint256 deadline
     ) external;
-
-    function addLiquidityETH(
-        address token,
-        uint256 amountTokenDesired,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline
-    ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
 }
 
 contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
@@ -56,6 +47,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         uint256 price;
         bool active;
         bool fulfilled;
+        uint256 timestamp;
     }
 
     mapping(uint256 => Listing) public listings;
@@ -66,7 +58,8 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         address indexed seller,
         uint256 poolId,
         uint256 stakeId,
-        uint256 price
+        uint256 price,
+        uint256 timestamp
     );
     event ListingCancelled(uint256 indexed listingId);
     event ListingFulfilled(uint256 indexed listingId, address indexed buyer);
@@ -100,10 +93,11 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
             stakeId: stakeId,
             price: price,
             active: true,
-            fulfilled: false
+            fulfilled: false,
+            timestamp: block.timestamp
         });
 
-        emit ListingCreated(listingId, msg.sender, poolId, stakeId, price);
+        emit ListingCreated(listingId, msg.sender, poolId, stakeId, price, block.timestamp);
     }
 
     function cancelListing(uint256 listingId) external nonReentrant {

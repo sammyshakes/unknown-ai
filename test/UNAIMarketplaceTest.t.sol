@@ -3,9 +3,9 @@ pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
-import {Contract} from "../src/UNAI.sol";
+import {Contract, IDexRouter} from "../src/UNAI.sol";
 import "../src/UNAIStaking.sol";
-import {UNAIStakeMarketplace, IDEXRouter} from "../src/UNAIStakeMarketplace.sol";
+import {UNAIStakeMarketplace} from "../src/UNAIStakeMarketplace.sol";
 
 interface IWETH {
     function deposit() external payable;
@@ -17,7 +17,7 @@ contract StakeMarketplaceTest is Test {
     Contract public unaiToken;
     UNAIStakeMarketplace public marketplace;
     IWETH public weth;
-    IDEXRouter public dexRouter;
+    IDexRouter public dexRouter;
 
     address public owner = address(this);
     address public user1 = address(0x1);
@@ -30,7 +30,7 @@ contract StakeMarketplaceTest is Test {
         stakingVault = new StakingVault(IERC20(address(unaiToken)));
         marketplace =
             new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER);
-        dexRouter = IDEXRouter(DEX_ROUTER);
+        dexRouter = IDexRouter(DEX_ROUTER);
         weth = IWETH(dexRouter.WETH());
 
         unaiToken.setStakingContract(address(stakingVault));
@@ -66,8 +66,8 @@ contract StakeMarketplaceTest is Test {
         );
     }
 
-    function testCreateListing() public {
-        console.log("Testing create listing...");
+    function testCreateListingWithTimestamp() public {
+        console.log("Testing create listing with timestamp...");
         uint256 poolId = 0;
         uint256 stakeAmount = 100 * 1e18;
 
@@ -80,6 +80,7 @@ contract StakeMarketplaceTest is Test {
 
         // User1 creates a listing
         console.log("User1 creating listing...");
+        uint256 listingTimestamp = block.timestamp;
         marketplace.createListing(poolId, 0, 150 * 1e18);
         vm.stopPrank();
 
@@ -90,14 +91,16 @@ contract StakeMarketplaceTest is Test {
             uint256 stakeId,
             uint256 price,
             bool active,
-            bool fulfilled
-        ) = marketplace.getListing(0);
+            bool fulfilled,
+            uint256 timestamp
+        ) = marketplace.listings(0);
         console.log("Listing created. Seller:", seller);
         console.log("Listed Pool ID:", listedPoolId);
         console.log("Stake ID:", stakeId);
         console.log("Price:", price / 1e18);
         console.log("Active:", active);
         console.log("Fulfilled:", fulfilled);
+        console.log("Timestamp:", timestamp);
 
         assertEq(seller, user1);
         assertEq(listedPoolId, poolId);
@@ -105,6 +108,7 @@ contract StakeMarketplaceTest is Test {
         assertEq(price, 150 * 1e18);
         assertTrue(active);
         assertFalse(fulfilled);
+        assertEq(timestamp, listingTimestamp);
     }
 
     function testCancelListing() public {
