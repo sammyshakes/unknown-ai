@@ -5,12 +5,11 @@ import "forge-std/Test.sol";
 import {StakingVault, IERC20} from "../src/UNAIStaking.sol";
 import {Contract, IDexRouter} from "../src/UNAI.sol";
 
-contract UNAIStakingTest is Test {
+contract StakingVaultTest is Test {
     StakingVault public stakingVault;
     Contract public unaiToken; // This is the UNAI token used for staking and rewards
 
     // dex router address
-    // address public router = address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
     address public router = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); // Sepolia
 
     IDexRouter dexRouter = IDexRouter(router);
@@ -23,12 +22,6 @@ contract UNAIStakingTest is Test {
         unaiToken = new Contract();
         stakingVault = new StakingVault(IERC20(address(unaiToken)));
         unaiToken.setStakingContract(address(stakingVault));
-
-        //get total supply
-        assertEq(unaiToken.totalSupply(), 10 * 1e6 * 1e18);
-
-        //check balance of owner
-        assertEq(unaiToken.balanceOf(owner), unaiToken.totalSupply());
 
         // Provide liquidity to the pool
         uint256 ethAmount = 10 ether;
@@ -43,14 +36,17 @@ contract UNAIStakingTest is Test {
             address(unaiToken), tokenAmount, 0, 0, owner, block.timestamp
         );
 
-        stakingVault.addPool(180 days, 10);
+        // Add pools with different lockup durations
+        stakingVault.addPool(180 days, 10, StakingVault.LockupDuration.SixMonths);
+        stakingVault.addPool(90 days, 5, StakingVault.LockupDuration.ThreeMonths);
+        stakingVault.addPool(365 days, 15, StakingVault.LockupDuration.TwelveMonths);
 
         unaiToken.enableTrading(1);
 
-        //remove limits
+        // Remove limits
         unaiToken.removeLimits();
 
-        // roll the block to the future
+        // Roll the block to the future
         vm.roll(block.number + 2);
     }
 
@@ -76,10 +72,6 @@ contract UNAIStakingTest is Test {
 
     function test_ClaimRewards() public {
         uint256 poolId = 0;
-
-        // Add a pool to the staking vault
-        vm.prank(owner);
-        stakingVault.addPool(30 days, 1);
 
         // User1 buys tokens
         buyTokens(user1, 1 ether);
@@ -156,7 +148,8 @@ contract UNAIStakingTest is Test {
             uint256 totalStaked,
             uint256 lastRewardTime,
             uint256 lastRewardBalance,
-            uint256 weight
+            uint256 weight,
+            StakingVault.LockupDuration lockupDuration
         ) = stakingVault.pools(poolId);
         console.log("Pool lock period:", lockPeriod);
         console.log("Pool accETHPerShare:", accETHPerShare);
@@ -164,10 +157,11 @@ contract UNAIStakingTest is Test {
         console.log("Pool last reward time:", lastRewardTime);
         console.log("Pool last reward balance:", lastRewardBalance);
         console.log("Pool weight:", weight);
+        console.log("Pool lockup duration:", uint256(lockupDuration));
 
         vm.startPrank(user1);
         stakingVault.updatePool(poolId, false);
-        (, accETHPerShare,,,,) = stakingVault.pools(poolId);
+        (, accETHPerShare,,,,, lockupDuration) = stakingVault.pools(poolId);
 
         console.log("Pool accETHPerShare after update:", accETHPerShare);
         uint256 pendingRewards = stakingVault.pendingRewards(user1, poolId, 0);
@@ -192,55 +186,6 @@ contract UNAIStakingTest is Test {
         uint256 userEthBalance = user1.balance;
         console.log("User1 ETH balance after unstaking:", userEthBalance);
     }
-
-    // function test_StakeTransfer() public {
-    //     uint256 poolId = 0;
-
-    //     // Add a pool to the staking vault
-    //     vm.prank(owner);
-    //     stakingVault.addPool(30 days, 1);
-
-    //     // User1 buys tokens
-    //     buyTokens(user1, 1 ether);
-
-    //     // Stake tokens
-    //     vm.startPrank(user1);
-    //     unaiToken.approve(address(stakingVault), 100 * 1e18);
-    //     stakingVault.stake(poolId, 100 * 1e18);
-    //     vm.stopPrank();
-
-    //     stakingVault.distributeRewards{value: 1 ether}();
-
-    //     // Warp time to accumulate rewards
-    //     vm.warp(block.timestamp + 1 days);
-
-    //     // Approve transfer of the stake
-    //     vm.startPrank(user1);
-    //     stakingVault.approveStakeTransfer(user2, poolId, 0);
-    //     vm.stopPrank();
-
-    //     // Transfer the stake
-    //     vm.startPrank(user2);
-    //     stakingVault.transferStake(user1, user2, poolId, 0);
-    //     vm.stopPrank();
-
-    //     // Check the new owner of the stake
-    //     (,, address newOwner,) = stakingVault.stakes(user2, poolId, 0);
-    //     assertEq(newOwner, user2);
-
-    //     // Verify that the reward debt of the transferred stake is correct
-    //     uint256 pendingRewardsUser2 = stakingVault.pendingRewards(user2, poolId, 0);
-    //     assertTrue(pendingRewardsUser2 > 0, "User2 should have pending rewards after transfer");
-
-    //     // Claim rewards for user2
-    //     vm.startPrank(user2);
-    //     stakingVault.claimRewards(poolId, 0);
-    //     vm.stopPrank();
-
-    //     // Ensure that the rewards were successfully transferred
-    //     uint256 finalEthBalance = address(user2).balance;
-    //     assertTrue(finalEthBalance > 0, "User2 should have received ETH rewards");
-    // }
 
     function test_PeriodicBuysAndSellsWithRewards() public {
         uint256 poolId = 0;

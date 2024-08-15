@@ -8,6 +8,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract StakingVault is Ownable, ReentrancyGuard {
     IERC20 public unaiToken;
 
+    enum LockupDuration {
+        ThreeMonths,
+        SixMonths,
+        TwelveMonths
+    }
+
     struct Pool {
         uint256 lockPeriod;
         uint256 accETHPerShare;
@@ -15,6 +21,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
         uint256 lastRewardTime;
         uint256 lastRewardBalance;
         uint256 weight;
+        LockupDuration lockupDuration;
     }
 
     struct Stake {
@@ -31,9 +38,13 @@ contract StakingVault is Ownable, ReentrancyGuard {
 
     uint256 public totalStaked;
 
-    event PoolAdded(uint256 indexed poolId, uint256 lockPeriod);
+    event PoolAdded(uint256 indexed poolId, uint256 lockPeriod, LockupDuration lockupDuration);
     event Staked(
-        address indexed user, uint256 indexed poolId, uint256 indexed stakeId, uint256 amount
+        address indexed user,
+        uint256 indexed poolId,
+        uint256 indexed stakeId,
+        uint256 amount,
+        uint256 lockEndTime
     );
     event Unstaked(
         address indexed user,
@@ -56,7 +67,10 @@ contract StakingVault is Ownable, ReentrancyGuard {
         unaiToken = _unaiToken;
     }
 
-    function addPool(uint256 lockPeriod, uint256 weight) external onlyOwner {
+    function addPool(uint256 lockPeriod, uint256 weight, LockupDuration lockupDuration)
+        external
+        onlyOwner
+    {
         pools.push(
             Pool({
                 lockPeriod: lockPeriod,
@@ -64,10 +78,11 @@ contract StakingVault is Ownable, ReentrancyGuard {
                 totalStaked: 0,
                 lastRewardTime: block.timestamp,
                 lastRewardBalance: 0,
-                weight: weight
+                weight: weight,
+                lockupDuration: lockupDuration
             })
         );
-        emit PoolAdded(pools.length - 1, lockPeriod);
+        emit PoolAdded(pools.length - 1, lockPeriod, lockupDuration);
     }
 
     function updatePool(uint256 poolId, bool isDistributing) public {
@@ -111,7 +126,17 @@ contract StakingVault is Ownable, ReentrancyGuard {
     function stake(uint256 poolId, uint256 amount) external nonReentrant {
         updatePool(poolId, false);
         Pool storage pool = pools[poolId];
-        uint256 lockEndTime = block.timestamp + pool.lockPeriod;
+
+        uint256 lockEndTime;
+        if (pool.lockupDuration == LockupDuration.ThreeMonths) {
+            lockEndTime = block.timestamp + 90 days;
+        } else if (pool.lockupDuration == LockupDuration.SixMonths) {
+            lockEndTime = block.timestamp + 180 days;
+        } else if (pool.lockupDuration == LockupDuration.TwelveMonths) {
+            lockEndTime = block.timestamp + 365 days;
+        } else {
+            revert("Invalid lockup duration");
+        }
 
         stakes[msg.sender][poolId].push(
             Stake({
@@ -126,7 +151,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
         pool.totalStaked += amount; // Update the total staked in the pool
         totalStaked += amount; // Update the total staked in the contract
 
-        emit Staked(msg.sender, poolId, stakes[msg.sender][poolId].length - 1, amount);
+        emit Staked(msg.sender, poolId, stakes[msg.sender][poolId].length - 1, amount, lockEndTime);
     }
 
     function unstake(uint256 poolId, uint256 stakeId) external nonReentrant {
@@ -217,21 +242,6 @@ contract StakingVault is Ownable, ReentrancyGuard {
         delete stakes[from][poolId][stakeId]; // Remove the stake from the original owner
 
         emit StakeTransferred(from, to, poolId, stakeId);
-    }
-
-    function estimateAPY(uint256 poolId, uint256 observationPeriod)
-        external
-        view
-        returns (uint256)
-    {
-        uint256 rewardsPerShare = pools[poolId].accETHPerShare;
-
-        // Annualize the rewards per share
-        uint256 annualizedRewardsPerShare = (rewardsPerShare * 365 days) / observationPeriod;
-
-        // Calculate APY
-        uint256 apy = (annualizedRewardsPerShare * 100) / 1e18;
-        return apy;
     }
 
     function setMarketplaceAuthorization(address marketplace, bool isAuthorized)

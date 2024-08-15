@@ -26,7 +26,9 @@ contract StakeMarketplaceTest is Test {
         stakingVault.setMarketplaceAuthorization(address(marketplace), true);
 
         // Setup initial conditions
-        stakingVault.addPool(30 days, 10);
+        stakingVault.addPool(30 days, 10, StakingVault.LockupDuration.ThreeMonths);
+        stakingVault.addPool(90 days, 5, StakingVault.LockupDuration.SixMonths);
+        stakingVault.addPool(365 days, 15, StakingVault.LockupDuration.TwelveMonths);
         unaiToken.enableTrading(1);
         unaiToken.removeLimits();
 
@@ -58,19 +60,27 @@ contract StakeMarketplaceTest is Test {
         vm.stopPrank();
 
         // Check if listing was created correctly
-        (address seller, uint256 listedPoolId, uint256 stakeId, uint256 price, bool active) =
-            marketplace.listings(0);
+        (
+            address seller,
+            uint256 listedPoolId,
+            uint256 stakeId,
+            uint256 price,
+            bool active,
+            bool fulfilled
+        ) = marketplace.getListing(0);
         console.log("Listing created. Seller:", seller);
         console.log("Listed Pool ID:", listedPoolId);
         console.log("Stake ID:", stakeId);
         console.log("Price:", price / 1e18);
         console.log("Active:", active);
+        console.log("Fulfilled:", fulfilled);
 
         assertEq(seller, user1);
         assertEq(listedPoolId, poolId);
         assertEq(stakeId, 0);
         assertEq(price, 150 * 1e18);
         assertTrue(active);
+        assertFalse(fulfilled);
     }
 
     function testCancelListing() public {
@@ -91,9 +101,11 @@ contract StakeMarketplaceTest is Test {
         vm.stopPrank();
 
         // Check if listing was cancelled
-        (,,,, bool active) = marketplace.listings(0);
+        (,,,, bool active, bool fulfilled) = marketplace.getListing(0);
         console.log("Listing active status after cancellation:", active);
+        console.log("Listing fulfilled status after cancellation:", fulfilled);
         assertFalse(active);
+        assertFalse(fulfilled);
     }
 
     function testFulfillListing() public {
@@ -118,8 +130,9 @@ contract StakeMarketplaceTest is Test {
         vm.stopPrank();
 
         // Check if listing was fulfilled and stake was transferred
-        (,,,, bool active) = marketplace.listings(0);
+        (,,,, bool active, bool fulfilled) = marketplace.getListing(0);
         console.log("Listing active status after fulfillment:", active);
+        console.log("Listing fulfilled status after fulfillment:", fulfilled);
 
         (uint256 amount,, address stakeOwner,) = stakingVault.stakes(user2, poolId, 0);
         console.log("New stake owner:", stakeOwner);
@@ -127,12 +140,92 @@ contract StakeMarketplaceTest is Test {
 
         assertEq(stakeOwner, user2);
         assertEq(amount, stakeAmount);
+        assertFalse(active);
+        assertTrue(fulfilled);
 
         // Check if payment was transferred
         console.log("User1 balance after sale:", unaiToken.balanceOf(user1) / 1e18);
         console.log("User2 balance after purchase:", unaiToken.balanceOf(user2) / 1e18);
         assertEq(unaiToken.balanceOf(user1), 1050 * 1e18);
         assertEq(unaiToken.balanceOf(user2), 850 * 1e18);
+    }
+
+    function testGetActiveListings() public {
+        console.log("Testing get active listings...");
+        uint256 poolId = 0;
+        uint256 stakeAmount = 100 * 1e18;
+
+        // User1 stakes tokens and creates listings
+        vm.startPrank(user1);
+        console.log("User1 staking tokens and creating listings...");
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(poolId, stakeAmount);
+        marketplace.createListing(poolId, 0, 150 * 1e18);
+
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(poolId, stakeAmount);
+        marketplace.createListing(poolId, 1, 200 * 1e18);
+        vm.stopPrank();
+
+        // Get all active listings
+        UNAIStakeMarketplace.Listing[] memory activeListings = marketplace.getActiveListings();
+        console.log("Number of active listings:", activeListings.length);
+        assertEq(activeListings.length, 2);
+
+        for (uint256 i = 0; i < activeListings.length; i++) {
+            console.log("Active Listing", i);
+            console.log("Seller:", activeListings[i].seller);
+            console.log("Pool ID:", activeListings[i].poolId);
+            console.log("Stake ID:", activeListings[i].stakeId);
+            console.log("Price:", activeListings[i].price / 1e18);
+            console.log("Active:", activeListings[i].active);
+            console.log("Fulfilled:", activeListings[i].fulfilled);
+            assertTrue(activeListings[i].active);
+            assertFalse(activeListings[i].fulfilled);
+        }
+    }
+
+    function testGetFulfilledListings() public {
+        console.log("Testing get fulfilled listings...");
+        uint256 poolId = 0;
+        uint256 stakeAmount = 100 * 1e18;
+        uint256 listingPrice = 150 * 1e18;
+
+        // User1 stakes tokens and creates listings
+        vm.startPrank(user1);
+        console.log("User1 staking tokens and creating listings...");
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(poolId, stakeAmount);
+        marketplace.createListing(poolId, 0, listingPrice);
+
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(poolId, stakeAmount);
+        marketplace.createListing(poolId, 1, listingPrice);
+        vm.stopPrank();
+
+        // User2 fulfills the first listing
+        vm.startPrank(user2);
+        console.log("User2 fulfilling listing...");
+        unaiToken.approve(address(marketplace), listingPrice);
+        marketplace.fulfillListing(0);
+        vm.stopPrank();
+
+        // Get all fulfilled listings
+        UNAIStakeMarketplace.Listing[] memory fulfilledListings = marketplace.getFulfilledListings();
+        console.log("Number of fulfilled listings:", fulfilledListings.length);
+        assertEq(fulfilledListings.length, 1);
+
+        for (uint256 i = 0; i < fulfilledListings.length; i++) {
+            console.log("Fulfilled Listing", i);
+            console.log("Seller:", fulfilledListings[i].seller);
+            console.log("Pool ID:", fulfilledListings[i].poolId);
+            console.log("Stake ID:", fulfilledListings[i].stakeId);
+            console.log("Price:", fulfilledListings[i].price / 1e18);
+            console.log("Active:", fulfilledListings[i].active);
+            console.log("Fulfilled:", fulfilledListings[i].fulfilled);
+            assertFalse(fulfilledListings[i].active);
+            assertTrue(fulfilledListings[i].fulfilled);
+        }
     }
 
     function testUnauthorizedListingCreation() public {

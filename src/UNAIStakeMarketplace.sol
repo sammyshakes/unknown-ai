@@ -6,6 +6,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 interface IStakingVault {
+    enum LockupDuration {
+        ThreeMonths,
+        SixMonths,
+        TwelveMonths
+    }
+
     function transferStake(address from, address to, uint256 poolId, uint256 stakeId) external;
     function stakes(address user, uint256 poolId, uint256 stakeId)
         external
@@ -23,6 +29,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         uint256 stakeId;
         uint256 price;
         bool active;
+        bool fulfilled;
     }
 
     mapping(uint256 => Listing) public listings;
@@ -37,6 +44,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     );
     event ListingCancelled(uint256 indexed listingId);
     event ListingFulfilled(uint256 indexed listingId, address indexed buyer);
+    event ListingUpdated(uint256 indexed listingId, uint256 newPrice);
 
     constructor(address _stakingVault, address _paymentToken) Ownable(msg.sender) {
         stakingVault = IStakingVault(_stakingVault);
@@ -53,7 +61,8 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
             poolId: poolId,
             stakeId: stakeId,
             price: price,
-            active: true
+            active: true,
+            fulfilled: false
         });
 
         emit ListingCreated(listingId, msg.sender, poolId, stakeId, price);
@@ -71,8 +80,10 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     function fulfillListing(uint256 listingId) external nonReentrant {
         Listing storage listing = listings[listingId];
         require(listing.active, "Listing is not active");
+        require(!listing.fulfilled, "Listing is already fulfilled");
 
         listing.active = false;
+        listing.fulfilled = true;
 
         require(
             paymentToken.transferFrom(msg.sender, listing.seller, listing.price),
@@ -84,11 +95,102 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         emit ListingFulfilled(listingId, msg.sender);
     }
 
+    function updateListingPrice(uint256 listingId, uint256 newPrice) external nonReentrant {
+        Listing storage listing = listings[listingId];
+        require(listing.seller == msg.sender, "Not the seller of this listing");
+        require(listing.active, "Listing is not active");
+
+        listing.price = newPrice;
+        emit ListingUpdated(listingId, newPrice);
+    }
+
     function updateStakingVault(address _stakingVault) external onlyOwner {
         stakingVault = IStakingVault(_stakingVault);
     }
 
     function updatePaymentToken(address _paymentToken) external onlyOwner {
         paymentToken = IERC20(_paymentToken);
+    }
+
+    // View functions
+
+    function getListing(uint256 listingId)
+        external
+        view
+        returns (
+            address seller,
+            uint256 poolId,
+            uint256 stakeId,
+            uint256 price,
+            bool active,
+            bool fulfilled
+        )
+    {
+        Listing memory listing = listings[listingId];
+        return (
+            listing.seller,
+            listing.poolId,
+            listing.stakeId,
+            listing.price,
+            listing.active,
+            listing.fulfilled
+        );
+    }
+
+    function getActiveListings() external view returns (Listing[] memory) {
+        uint256 activeCount = 0;
+        for (uint256 i = 0; i < nextListingId; i++) {
+            if (listings[i].active) {
+                activeCount++;
+            }
+        }
+
+        Listing[] memory activeListings = new Listing[](activeCount);
+        uint256 index = 0;
+        for (uint256 i = 0; i < nextListingId; i++) {
+            if (listings[i].active) {
+                activeListings[index] = listings[i];
+                index++;
+            }
+        }
+        return activeListings;
+    }
+
+    function getFulfilledListings() external view returns (Listing[] memory) {
+        uint256 fulfilledCount = 0;
+        for (uint256 i = 0; i < nextListingId; i++) {
+            if (listings[i].fulfilled) {
+                fulfilledCount++;
+            }
+        }
+
+        Listing[] memory fulfilledListings = new Listing[](fulfilledCount);
+        uint256 index = 0;
+        for (uint256 i = 0; i < nextListingId; i++) {
+            if (listings[i].fulfilled) {
+                fulfilledListings[index] = listings[i];
+                index++;
+            }
+        }
+        return fulfilledListings;
+    }
+
+    function getListingsBySeller(address seller) external view returns (Listing[] memory) {
+        uint256 count = 0;
+        for (uint256 i = 0; i < nextListingId; i++) {
+            if (listings[i].seller == seller) {
+                count++;
+            }
+        }
+
+        Listing[] memory sellerListings = new Listing[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < nextListingId; i++) {
+            if (listings[i].seller == seller) {
+                sellerListings[index] = listings[i];
+                index++;
+            }
+        }
+        return sellerListings;
     }
 }
