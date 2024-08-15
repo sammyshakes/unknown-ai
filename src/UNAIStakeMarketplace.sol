@@ -19,9 +19,23 @@ interface IStakingVault {
         returns (uint256 amount, uint256 rewardDebt, address owner, uint256 lockEndTime);
 }
 
+interface IDEXRouter {
+    function swapExactTokensForETH(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external returns (uint256[] memory amounts);
+}
+
 contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     IStakingVault public stakingVault;
     IERC20 public paymentToken;
+    IDEXRouter public dexRouter;
+    address public WETH;
+
+    uint256 public marketplaceFee; // Fee in basis points (e.g., 100 = 1%)
 
     struct Listing {
         address seller;
@@ -45,10 +59,22 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     event ListingCancelled(uint256 indexed listingId);
     event ListingFulfilled(uint256 indexed listingId, address indexed buyer);
     event ListingUpdated(uint256 indexed listingId, uint256 newPrice);
+    event MarketplaceFeeUpdated(uint256 newFee);
 
-    constructor(address _stakingVault, address _paymentToken) Ownable(msg.sender) {
+    constructor(address _stakingVault, address _paymentToken, address _dexRouter, address _WETH)
+        Ownable(msg.sender)
+    {
         stakingVault = IStakingVault(_stakingVault);
         paymentToken = IERC20(_paymentToken);
+        dexRouter = IDEXRouter(_dexRouter);
+        WETH = _WETH;
+        marketplaceFee = 100; // Default 1% fee
+    }
+
+    function setMarketplaceFee(uint256 _fee) external onlyOwner {
+        require(_fee <= 1000, "Fee cannot exceed 10%");
+        marketplaceFee = _fee;
+        emit MarketplaceFeeUpdated(_fee);
     }
 
     function createListing(uint256 poolId, uint256 stakeId, uint256 price) external nonReentrant {
