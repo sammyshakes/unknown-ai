@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {StakingVault, IERC20} from "../src/UNAIStaking.sol";
@@ -7,9 +7,8 @@ import {Contract, IDexRouter} from "../src/UNAI.sol";
 
 contract StakingVaultTest is Test {
     StakingVault public stakingVault;
-    Contract public unaiToken; // This is the UNAI token used for staking and rewards
+    Contract public unaiToken;
 
-    // dex router address
     address public router = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); // Sepolia
 
     IDexRouter dexRouter = IDexRouter(router);
@@ -35,11 +34,6 @@ contract StakingVaultTest is Test {
         dexRouter.addLiquidityETH{value: 1 ether}(
             address(unaiToken), tokenAmount, 0, 0, owner, block.timestamp
         );
-
-        // Add pools with different lockup durations
-        stakingVault.addPool(180 days, 10, StakingVault.LockupDuration.SixMonths);
-        stakingVault.addPool(90 days, 5, StakingVault.LockupDuration.ThreeMonths);
-        stakingVault.addPool(365 days, 15, StakingVault.LockupDuration.TwelveMonths);
 
         unaiToken.enableTrading(1);
 
@@ -70,45 +64,9 @@ contract StakingVaultTest is Test {
         vm.stopPrank();
     }
 
-    function test_ClaimRewards() public {
-        uint256 poolId = 0;
-
-        // User1 buys tokens
-        buyTokens(user1, 1 ether);
-
-        // Stake tokens
-        vm.startPrank(user1);
-        unaiToken.approve(address(stakingVault), 100 * 1e18);
-        stakingVault.stake(poolId, 100 * 1e18);
-        vm.stopPrank();
-
-        // Distribute rewards to the pool
-        vm.prank(owner);
-        stakingVault.distributeRewards{value: 1 ether}();
-
-        // Warp to simulate passage of time
-        vm.warp(block.timestamp + 1 days);
-        vm.roll(block.number + 10);
-
-        // Check initial ETH balance
-        uint256 initialEthBalance = address(user1).balance;
-        console.log("Initial ETH balance:", initialEthBalance);
-
-        // Claim rewards
-        vm.startPrank(user1);
-        stakingVault.claimRewards(poolId, 0);
-        vm.stopPrank();
-
-        // Check final ETH balance
-        uint256 finalEthBalance = address(user1).balance;
-        console.log("Final ETH balance:", finalEthBalance);
-
-        // Ensure that the rewards were successfully transferred
-        assertTrue(finalEthBalance > initialEthBalance, "User1 should have received ETH rewards");
-    }
-
     function test_StakeAndUnstake() public {
-        uint256 poolId = 0;
+        uint256 stakeAmount = 100 * 1e18;
+        uint256 lockDuration = 90 days;
 
         // User1 buys tokens
         buyTokens(user1, 1 ether);
@@ -116,179 +74,150 @@ contract StakingVaultTest is Test {
         console.log("User1 balance before staking:", unaiToken.balanceOf(user1));
 
         vm.startPrank(user1);
-        unaiToken.approve(address(stakingVault), 100 * 1e18);
-        stakingVault.stake(poolId, 100 * 1e18);
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(stakeAmount, lockDuration);
         vm.stopPrank();
 
         console.log("User1 balance after staking:", unaiToken.balanceOf(user1));
 
-        (uint256 amount,, address stakeOwner,) = stakingVault.stakes(user1, poolId, 0);
+        (uint256 amount, uint256 startTime, uint256 duration, uint256 shares, uint256 rewardDebt) =
+            stakingVault.userStakes(user1, 0);
         console.log("Staked amount:", amount);
-        console.log("Stake owner:", stakeOwner);
+        console.log("Start time:", startTime);
+        console.log("Lock duration:", duration);
+        console.log("Shares:", shares);
 
-        assertEq(amount, 100 * 1e18);
-        assertEq(stakeOwner, user1);
+        assertEq(amount, stakeAmount);
+        assertEq(duration, lockDuration);
+        assertEq(shares, stakeAmount); // Because lockDuration == SHARE_TIME_FRAME
 
-        // Add rewards to the pool
-        stakingVault.distributeRewards{value: 1 ether}();
+        // Add rewards to the staking vault
+        vm.deal(address(stakingVault), 1 ether);
 
-        console.log("Rewards added to staking vault:", address(stakingVault).balance);
-
-        // Warp time and roll blocks
-        vm.warp(block.timestamp + 180 days);
-        vm.roll(block.number + 10);
+        // Warp time to after lock period
+        vm.warp(block.timestamp + lockDuration);
 
         uint256 initialEthBalance = user1.balance;
         console.log("User1 ETH balance before unstaking:", initialEthBalance);
 
-        // Log pool information before unstaking
-        (
-            uint256 lockPeriod,
-            uint256 accETHPerShare,
-            uint256 totalStaked,
-            uint256 lastRewardTime,
-            uint256 lastRewardBalance,
-            uint256 weight,
-            StakingVault.LockupDuration lockupDuration
-        ) = stakingVault.pools(poolId);
-        console.log("Pool lock period:", lockPeriod);
-        console.log("Pool accETHPerShare:", accETHPerShare);
-        console.log("Pool total staked:", totalStaked);
-        console.log("Pool last reward time:", lastRewardTime);
-        console.log("Pool last reward balance:", lastRewardBalance);
-        console.log("Pool weight:", weight);
-        console.log("Pool lockup duration:", uint256(lockupDuration));
+        vm.prank(user1);
+        stakingVault.unstake(0);
 
-        vm.startPrank(user1);
-        stakingVault.updatePool(poolId, false);
-        (, accETHPerShare,,,,, lockupDuration) = stakingVault.pools(poolId);
-
-        console.log("Pool accETHPerShare after update:", accETHPerShare);
-        uint256 pendingRewards = stakingVault.pendingRewards(user1, poolId, 0);
-        console.log("Pending rewards before unstaking:", pendingRewards);
-        stakingVault.unstake(poolId, 0);
-        vm.stopPrank();
-
-        (amount,, stakeOwner,) = stakingVault.stakes(user1, poolId, 0);
-        console.log("Staked amount after unstaking:", amount);
-        console.log("Stake owner after unstaking:", stakeOwner);
-
-        assertEq(amount, 0);
-        assertEq(stakeOwner, address(0));
-
-        // Check if user received ETH rewards
         uint256 finalEthBalance = user1.balance;
-        assertGt(finalEthBalance, initialEthBalance, "User should have received ETH rewards");
         console.log("User1 ETH balance after unstaking:", finalEthBalance);
-        console.log("ETH balance difference:", finalEthBalance - initialEthBalance);
+        assertGt(finalEthBalance, initialEthBalance, "User should have received ETH rewards");
 
-        // Check if user received rewards
-        uint256 userEthBalance = user1.balance;
-        console.log("User1 ETH balance after unstaking:", userEthBalance);
+        // Check that the stake has been removed
+        vm.expectRevert();
+        stakingVault.userStakes(user1, 0);
     }
 
-    function test_PeriodicBuysAndSellsWithRewards() public {
-        uint256 poolId = 0;
-        address[5] memory users =
-            [address(0x1), address(0x2), address(0x3), address(0x4), address(0x5)];
+    function test_ClaimRewards() public {
+        uint256 stakeAmount = 100 * 1e18;
+        uint256 lockDuration = 90 days;
 
-        // Fund the staking contract with ETH for rewards
-        vm.deal(address(stakingVault), 100 ether);
+        // User1 buys tokens
+        buyTokens(user1, 1 ether);
 
-        // Users buy and sell tokens periodically
-        for (uint256 i = 0; i < 1; i++) {
-            for (uint256 j = 0; j < users.length; j++) {
-                address user = users[j];
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(stakeAmount, lockDuration);
+        vm.stopPrank();
 
-                // Multiple buys per user per iteration
-                for (uint256 k = 0; k < 2; k++) {
-                    // User buys tokens from the liquidity pool
-                    buyTokens(user, 1 ether);
+        // Add rewards to the staking vault
+        vm.deal(address(stakingVault), 1 ether);
 
-                    // Log user balance after buying tokens
-                    console.log("Iteration:", i);
-                    console.log("User:", user);
-                    console.log("Balance UNAI after buy:", unaiToken.balanceOf(user) / 1e18);
+        // Warp time to simulate passage of time
+        vm.warp(block.timestamp + 30 days);
 
-                    // tokens for staking
-                    uint256 tokensForStaking = unaiToken.tokensForStaking();
-                    console.log("Tokens for staking", tokensForStaking / 1e18);
-                }
+        // Check initial ETH balance
+        uint256 initialEthBalance = user1.balance;
+        console.log("Initial ETH balance:", initialEthBalance);
 
-                // User stakes tokens
-                vm.startPrank(user);
-                unaiToken.approve(address(stakingVault), 100 * 1e18);
-                stakingVault.stake(poolId, 100 * 1e18);
-                vm.stopPrank();
+        // Claim rewards
+        vm.prank(user1);
+        stakingVault.claimRewards(0);
 
-                // Log staking details
-                console.log("Iteration:", i);
-                console.log("User:", user);
-                console.log("Staked 100 tokens");
+        // Check final ETH balance
+        uint256 finalEthBalance = user1.balance;
+        console.log("Final ETH balance:", finalEthBalance);
 
-                // Roll the block to simulate the passage of time
-                vm.warp(block.timestamp + 1 days);
-                vm.roll(block.number + 10);
+        assertTrue(finalEthBalance > initialEthBalance, "User1 should have received ETH rewards");
+    }
 
-                // Multiple sells per user per iteration
-                for (uint256 k = 0; k < 1; k++) {
-                    // User sells some tokens back to the liquidity pool
-                    vm.startPrank(user);
-                    address[] memory path = new address[](2);
-                    path[0] = address(unaiToken);
-                    path[1] = dexRouter.WETH();
+    function test_TransferStake() public {
+        uint256 stakeAmount = 100 * 1e18;
+        uint256 lockDuration = 90 days;
 
-                    unaiToken.approve(address(dexRouter), 100 * 1e18);
-                    try dexRouter.swapExactTokensForETHSupportingFeeOnTransferTokens(
-                        100 * 1e18,
-                        0, // accept any amount of ETH
-                        path,
-                        user,
-                        block.timestamp
-                    ) {
-                        console.log("User:", user);
-                        console.log("Successfully swapped tokens for ETH");
-                    } catch {
-                        console.log("User:", user);
-                        console.log("Failed to swap tokens for ETH");
-                    }
-                    vm.stopPrank();
+        // User1 buys tokens and stakes
+        buyTokens(user1, 1 ether);
 
-                    // Log user balance after selling tokens
-                    console.log("Iteration:", i);
-                    console.log("User:", user);
-                    console.log("Balance UNAI after sell:", unaiToken.balanceOf(user) / 1e18);
-                }
-            }
-        }
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), stakeAmount);
+        stakingVault.stake(stakeAmount, lockDuration);
+        vm.stopPrank();
 
-        // Roll the block to simulate the passage of time
-        vm.warp(block.timestamp + 1 days);
-        vm.roll(block.number + 10);
+        // Authorize this contract as a marketplace
+        vm.prank(owner);
+        stakingVault.setMarketplaceAuthorization(address(this), true);
 
-        // Check rewards for each user
-        for (uint256 j = 0; j < users.length; j++) {
-            address user = users[j];
+        // Transfer stake from user1 to user2
+        stakingVault.transferStake(user1, user2, 0);
 
-            vm.startPrank(user);
-            uint256 initialBalance = user.balance; // Use ETH balance instead of token balance
-            console.log("User:", user);
-            console.log("Initial ETH balance before claiming rewards", initialBalance);
+        // Check that user1 no longer has the stake
+        vm.expectRevert();
+        stakingVault.userStakes(user1, 0);
 
-            // Calculate and log claimable rewards for the user
-            uint256 pendingRewards = stakingVault.pendingRewards(user, poolId, 0);
-            console.log("User:", user);
-            console.log("Claimable rewards", pendingRewards);
+        // Check that user2 now has the stake
+        (uint256 amount2, uint256 startTime2, uint256 duration2, uint256 shares2,) =
+            stakingVault.userStakes(user2, 0);
+        assertEq(amount2, stakeAmount);
+        assertEq(duration2, lockDuration);
+        assertEq(shares2, stakeAmount); // Because lockDuration == SHARE_TIME_FRAME
+    }
 
-            // Log the contract balance before claiming rewards
-            console.log("Contract balance", address(stakingVault).balance);
+    function test_MultipleStakesRewards() public {
+        uint256 stakeAmount = 100 * 1e18;
+        uint256 lockDuration1 = 90 days;
+        uint256 lockDuration2 = 180 days;
 
-            stakingVault.claimRewards(poolId, 0);
-            uint256 finalBalance = user.balance; // Use ETH balance instead of token balance
-            console.log("User:", user);
-            console.log("Final ETH balance after claiming rewards", finalBalance);
-            assert(finalBalance > initialBalance);
-            vm.stopPrank();
-        }
+        // User1 buys tokens
+        buyTokens(user1, 2 ether);
+
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), stakeAmount * 2);
+        stakingVault.stake(stakeAmount, lockDuration1);
+        stakingVault.stake(stakeAmount, lockDuration2);
+        vm.stopPrank();
+
+        // Add rewards to the staking vault
+        vm.deal(address(stakingVault), 1 ether);
+
+        // Warp time to after first lock period
+        vm.warp(block.timestamp + lockDuration1);
+
+        // Update rewards
+        stakingVault.updateRewards();
+
+        uint256 rewards1 = stakingVault.pendingRewards(user1, 0);
+        uint256 rewards2 = stakingVault.pendingRewards(user1, 1);
+
+        console.log("Rewards for 90-day stake:", rewards1);
+        console.log("Rewards for 180-day stake:", rewards2);
+
+        assertTrue(rewards2 > rewards1, "Longer lock duration should yield more rewards");
+
+        // Claim rewards for both stakes
+        vm.startPrank(user1);
+        uint256 initialBalance = user1.balance;
+        stakingVault.claimRewards(0);
+        stakingVault.claimRewards(1);
+        uint256 finalBalance = user1.balance;
+        vm.stopPrank();
+
+        uint256 totalRewardsClaimed = finalBalance - initialBalance;
+        console.log("Total rewards claimed:", totalRewardsClaimed);
+
+        assertTrue(totalRewardsClaimed > 0, "User1 should have received ETH rewards");
     }
 }

@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 interface IStakingVault {
-    enum LockupDuration {
-        ThreeMonths,
-        SixMonths,
-        TwelveMonths
-    }
-
-    function transferStake(address from, address to, uint256 poolId, uint256 stakeId) external;
-    function stakes(address user, uint256 poolId, uint256 stakeId)
+    function transferStake(address from, address to, uint256 stakeId) external;
+    function userStakes(address user, uint256 stakeId)
         external
         view
-        returns (uint256 amount, uint256 rewardDebt, address owner, uint256 lockEndTime);
+        returns (
+            uint256 amount,
+            uint256 startTime,
+            uint256 lockDuration,
+            uint256 shares,
+            uint256 rewardDebt
+        );
+    function pendingRewards(address user, uint256 stakeId) external view returns (uint256);
 }
 
 interface IDEXRouter {
@@ -41,8 +42,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     uint256 public marketplaceFee; // Fee in basis points (e.g., 100 = 1%)
 
     struct Listing {
-        uint8 poolId;
-        uint8 stakeId;
+        uint256 stakeId;
         bool active;
         bool fulfilled;
         address seller;
@@ -56,8 +56,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     event ListingCreated(
         uint256 indexed listingId,
         address indexed seller,
-        uint8 poolId,
-        uint8 stakeId,
+        uint256 stakeId,
         uint256 price,
         uint256 timestamp
     );
@@ -73,7 +72,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         paymentToken = IERC20(_paymentToken);
         dexRouter = IDEXRouter(_dexRouter);
         wethAddress = dexRouter.WETH();
-        marketplaceFee = 400;
+        marketplaceFee = 400; // 4%
     }
 
     function setMarketplaceFee(uint256 _fee) external onlyOwner {
@@ -82,13 +81,12 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         emit MarketplaceFeeUpdated(_fee);
     }
 
-    function createListing(uint8 poolId, uint8 stakeId, uint256 price) external nonReentrant {
-        (,, address owner,) = stakingVault.stakes(msg.sender, poolId, stakeId);
-        require(owner == msg.sender, "Not the owner of this stake");
+    function createListing(uint256 stakeId, uint256 price) external nonReentrant {
+        (uint256 amount,,,,) = stakingVault.userStakes(msg.sender, stakeId);
+        require(amount > 0, "Not the owner of this stake");
 
         uint256 listingId = nextListingId++;
         listings[listingId] = Listing({
-            poolId: poolId,
             stakeId: stakeId,
             active: true,
             fulfilled: false,
@@ -97,7 +95,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
             timestamp: block.timestamp
         });
 
-        emit ListingCreated(listingId, msg.sender, poolId, stakeId, price, block.timestamp);
+        emit ListingCreated(listingId, msg.sender, stakeId, price, block.timestamp);
     }
 
     function cancelListing(uint256 listingId) external nonReentrant {
@@ -129,7 +127,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
             paymentToken.transfer(listing.seller, sellerAmount), "Seller payment transfer failed"
         );
 
-        stakingVault.transferStake(listing.seller, msg.sender, listing.poolId, listing.stakeId);
+        stakingVault.transferStake(listing.seller, msg.sender, listing.stakeId);
 
         // Swap fee tokens for ETH
         swapTokensForEth(feeAmount);
@@ -158,24 +156,10 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
     function getListing(uint256 listingId)
         external
         view
-        returns (
-            address seller,
-            uint256 poolId,
-            uint256 stakeId,
-            uint256 price,
-            bool active,
-            bool fulfilled
-        )
+        returns (address seller, uint256 stakeId, uint256 price, bool active, bool fulfilled)
     {
         Listing memory listing = listings[listingId];
-        return (
-            listing.seller,
-            listing.poolId,
-            listing.stakeId,
-            listing.price,
-            listing.active,
-            listing.fulfilled
-        );
+        return (listing.seller, listing.stakeId, listing.price, listing.active, listing.fulfilled);
     }
 
     function getActiveListings() external view returns (Listing[] memory) {

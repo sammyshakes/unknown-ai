@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -8,180 +8,96 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract StakingVault is Ownable, ReentrancyGuard {
     IERC20 public unaiToken;
 
-    enum LockupDuration {
-        ThreeMonths,
-        SixMonths,
-        TwelveMonths
-    }
-
-    struct Pool {
-        uint256 lockPeriod;
-        uint256 accETHPerShare;
-        uint256 totalStaked;
-        uint256 lastRewardTime;
-        uint256 lastRewardBalance;
-        uint256 weight;
-        LockupDuration lockupDuration;
-    }
-
     struct Stake {
         uint256 amount;
+        uint256 startTime;
+        uint256 lockDuration;
+        uint256 shares;
         uint256 rewardDebt;
-        address owner;
-        uint256 lockEndTime;
     }
 
-    Pool[] public pools;
-    mapping(address => mapping(uint256 => Stake[])) public stakes;
+    uint256 public constant SHARE_TIME_FRAME = 90 days;
+    uint256 public totalShares;
+    uint256 public accRewardPerShare;
+    uint256 public lastUpdateTime;
+    uint256 public totalStaked;
+
+    mapping(address => Stake[]) public userStakes;
     mapping(address => address) public stakeApprovals;
     mapping(address => bool) public authorizedMarketplaces;
 
-    uint256 public totalStaked;
-
-    event PoolAdded(uint256 indexed poolId, uint256 lockPeriod, LockupDuration lockupDuration);
     event Staked(
-        address indexed user,
-        uint256 indexed poolId,
-        uint256 indexed stakeId,
-        uint256 amount,
-        uint256 lockEndTime
+        address indexed user, uint256 indexed stakeId, uint256 amount, uint256 lockDuration
     );
-    event Unstaked(
-        address indexed user,
-        uint256 indexed poolId,
-        uint256 indexed stakeId,
-        uint256 stakedAmount,
-        uint256 rewardAmount
-    );
-    event RewardsDistributed(uint256 indexed poolId, uint256 totalRewards);
-    event RewardsClaimed(
-        address indexed user, uint256 indexed poolId, uint256 indexed stakeId, uint256 reward
-    );
-    event RewardsPaidIn(uint256 amount);
-    event StakeTransferred(
-        address indexed from, address indexed to, uint256 indexed poolId, uint256 stakeId
-    );
+    event Unstaked(address indexed user, uint256 indexed stakeId, uint256 amount, uint256 reward);
+    event RewardsDistributed(uint256 totalRewards);
+    event RewardsClaimed(address indexed user, uint256 indexed stakeId, uint256 reward);
+    event StakeTransferred(address indexed from, address indexed to, uint256 stakeId);
     event MarketplaceAuthorizationSet(address indexed marketplace, bool isAuthorized);
 
     constructor(IERC20 _unaiToken) Ownable(msg.sender) {
         unaiToken = _unaiToken;
     }
 
-    function addPool(uint256 lockPeriod, uint256 weight, LockupDuration lockupDuration)
-        external
-        onlyOwner
-    {
-        pools.push(
-            Pool({
-                lockPeriod: lockPeriod,
-                accETHPerShare: 0,
-                totalStaked: 0,
-                lastRewardTime: block.timestamp,
-                lastRewardBalance: 0,
-                weight: weight,
-                lockupDuration: lockupDuration
-            })
-        );
-        emit PoolAdded(pools.length - 1, lockPeriod, lockupDuration);
-    }
-
-    function updatePool(uint256 poolId, bool isDistributing) public {
-        Pool storage pool = pools[poolId];
-        if (block.timestamp <= pool.lastRewardTime) {
+    function updateRewards() public {
+        if (block.timestamp <= lastUpdateTime) {
             return;
         }
-        uint256 tokenSupply = pool.totalStaked;
-        if (tokenSupply == 0) {
-            pool.lastRewardTime = block.timestamp;
+        if (totalShares == 0) {
+            lastUpdateTime = block.timestamp;
             return;
         }
 
-        uint256 rewardAmount = pool.lastRewardBalance;
+        uint256 rewardAmount = address(this).balance;
         if (rewardAmount > 0) {
-            pool.accETHPerShare += (rewardAmount * 1e18) / tokenSupply;
+            accRewardPerShare += (rewardAmount * 1e18) / totalShares;
         }
-        pool.lastRewardTime = block.timestamp;
-
-        if (isDistributing) {
-            pool.lastRewardBalance = 0;
-        }
+        lastUpdateTime = block.timestamp;
     }
 
-    function distributeRewards() public payable {
-        uint256 totalWeight = 0;
-        for (uint256 i = 0; i < pools.length; i++) {
-            totalWeight += pools[i].weight;
-        }
+    function stake(uint256 amount, uint256 lockDuration) external nonReentrant {
+        require(amount > 0, "Amount must be greater than 0");
+        require(lockDuration >= 30 days, "Lock duration must be at least 30 days");
 
-        for (uint256 i = 0; i < pools.length; i++) {
-            Pool storage pool = pools[i];
-            uint256 poolReward = (msg.value * pool.weight) / totalWeight;
-            pool.lastRewardBalance += poolReward;
-            updatePool(i, true); // Reset after distribution
-        }
+        updateRewards();
 
-        emit RewardsPaidIn(msg.value);
-    }
+        uint256 shares = (amount * lockDuration) / SHARE_TIME_FRAME;
+        Stake memory newStake = Stake({
+            amount: amount,
+            startTime: block.timestamp,
+            lockDuration: lockDuration,
+            shares: shares,
+            rewardDebt: shares * accRewardPerShare / 1e18
+        });
 
-    function stake(uint256 poolId, uint256 amount) external nonReentrant {
-        updatePool(poolId, false);
-        Pool storage pool = pools[poolId];
-
-        uint256 lockEndTime;
-        if (pool.lockupDuration == LockupDuration.ThreeMonths) {
-            lockEndTime = block.timestamp + 90 days;
-        } else if (pool.lockupDuration == LockupDuration.SixMonths) {
-            lockEndTime = block.timestamp + 180 days;
-        } else if (pool.lockupDuration == LockupDuration.TwelveMonths) {
-            lockEndTime = block.timestamp + 365 days;
-        } else {
-            revert("Invalid lockup duration");
-        }
-
-        stakes[msg.sender][poolId].push(
-            Stake({
-                amount: amount,
-                rewardDebt: amount * pool.accETHPerShare / 1e18,
-                owner: msg.sender,
-                lockEndTime: lockEndTime
-            })
-        );
+        userStakes[msg.sender].push(newStake);
+        totalShares += shares;
+        totalStaked += amount;
 
         unaiToken.transferFrom(msg.sender, address(this), amount);
-        pool.totalStaked += amount; // Update the total staked in the pool
-        totalStaked += amount; // Update the total staked in the contract
 
-        emit Staked(msg.sender, poolId, stakes[msg.sender][poolId].length - 1, amount, lockEndTime);
+        emit Staked(msg.sender, userStakes[msg.sender].length - 1, amount, lockDuration);
     }
 
-    function unstake(uint256 poolId, uint256 stakeId) external nonReentrant {
-        require(poolId < pools.length, "Invalid pool ID");
-        Pool storage pool = pools[poolId];
-        Stake storage userStake = stakes[msg.sender][poolId][stakeId];
+    function unstake(uint256 stakeId) external nonReentrant {
+        require(stakeId < userStakes[msg.sender].length, "Invalid stake ID");
+        Stake storage userStake = userStakes[msg.sender][stakeId];
+        require(
+            block.timestamp >= userStake.startTime + userStake.lockDuration, "Lock period not over"
+        );
 
-        require(userStake.owner == msg.sender, "Not the owner of this stake");
-        require(block.timestamp >= userStake.lockEndTime, "Lock period not over");
+        updateRewards();
 
         uint256 amount = userStake.amount;
-        require(amount <= pool.totalStaked, "Staked amount exceeds total staked in pool");
+        uint256 shares = userStake.shares;
+        uint256 pending = (shares * accRewardPerShare / 1e18) - userStake.rewardDebt;
 
-        // Update pool to get the latest accETHPerShare
-        updatePool(poolId, false);
+        totalShares -= shares;
+        totalStaked -= amount;
 
-        uint256 accETHPerShare = pool.accETHPerShare;
-        uint256 rewardDebt = userStake.rewardDebt;
-
-        uint256 pending = 0;
-        if (accETHPerShare > rewardDebt) {
-            pending = (amount * (accETHPerShare - rewardDebt)) / 1e18;
-        }
-
-        // Ensure pending rewards are non-negative
-        require(pending >= 0, "Pending reward calculation resulted in underflow");
-
-        pool.totalStaked -= amount; // Update the total staked in the pool
-        totalStaked -= amount; // Update the total staked in the contract
-        delete stakes[msg.sender][poolId][stakeId];
+        // Remove the stake by swapping with the last element and popping
+        userStakes[msg.sender][stakeId] = userStakes[msg.sender][userStakes[msg.sender].length - 1];
+        userStakes[msg.sender].pop();
 
         unaiToken.transfer(msg.sender, amount);
 
@@ -190,58 +106,60 @@ contract StakingVault is Ownable, ReentrancyGuard {
             require(success, "ETH transfer failed");
         }
 
-        emit Unstaked(msg.sender, poolId, stakeId, amount, pending);
+        emit Unstaked(msg.sender, stakeId, amount, pending);
     }
 
-    function claimRewards(uint256 poolId, uint256 stakeId) external nonReentrant {
-        Stake storage userStake = stakes[msg.sender][poolId][stakeId];
-        require(userStake.owner == msg.sender, "Not the owner of this stake");
+    function claimRewards(uint256 stakeId) external nonReentrant {
+        require(stakeId < userStakes[msg.sender].length, "Invalid stake ID");
+        Stake storage userStake = userStakes[msg.sender][stakeId];
 
-        updatePool(poolId, false);
-        Pool storage pool = pools[poolId];
+        updateRewards();
 
-        uint256 pending = (userStake.amount * pool.accETHPerShare) / 1e18 - userStake.rewardDebt;
+        uint256 pending = (userStake.shares * accRewardPerShare / 1e18) - userStake.rewardDebt;
         if (pending > 0) {
+            userStake.rewardDebt = userStake.shares * accRewardPerShare / 1e18;
             (bool success,) = msg.sender.call{value: pending}("");
             require(success, "ETH transfer failed");
-            emit RewardsClaimed(msg.sender, poolId, stakeId, pending);
+            emit RewardsClaimed(msg.sender, stakeId, pending);
         }
-
-        userStake.rewardDebt = userStake.amount * pool.accETHPerShare / 1e18;
     }
 
-    function pendingRewards(address user, uint256 poolId, uint256 stakeId)
-        external
-        view
-        returns (uint256)
-    {
-        Stake storage userStake = stakes[user][poolId][stakeId];
-        Pool storage pool = pools[poolId];
+    function pendingRewards(address user, uint256 stakeId) external view returns (uint256) {
+        require(stakeId < userStakes[user].length, "Invalid stake ID");
+        Stake storage userStake = userStakes[user][stakeId];
 
-        uint256 accETHPerShare = pool.accETHPerShare;
-        uint256 rewardDebt = userStake.rewardDebt;
-        uint256 amount = userStake.amount;
-
-        uint256 pending = (amount * accETHPerShare / 1e18) - rewardDebt;
+        uint256 _accRewardPerShare = accRewardPerShare;
+        uint256 pending = (userStake.shares * _accRewardPerShare / 1e18) - userStake.rewardDebt;
 
         return pending;
     }
 
-    function transferStake(address from, address to, uint256 poolId, uint256 stakeId) external {
+    function transferStake(address from, address to, uint256 stakeId) external {
         require(authorizedMarketplaces[msg.sender], "Caller is not an authorized marketplace");
+        require(stakeId < userStakes[from].length, "Invalid stake ID");
 
-        Stake storage fromStake = stakes[from][poolId][stakeId];
-        require(fromStake.owner == from, "Not the owner of this stake");
+        updateRewards();
 
-        updatePool(poolId, false);
+        Stake memory transferredStake = userStakes[from][stakeId];
+        uint256 pending =
+            (transferredStake.shares * accRewardPerShare / 1e18) - transferredStake.rewardDebt;
 
-        Stake memory newStake = fromStake;
-        newStake.owner = to; // Update the owner of the new stake
-        stakes[to][poolId].push(newStake);
+        // Transfer any pending rewards to the original owner
+        if (pending > 0) {
+            (bool success,) = from.call{value: pending}("");
+            require(success, "ETH transfer failed");
+        }
 
-        delete stakes[from][poolId][stakeId]; // Remove the stake from the original owner
+        // Reset the reward debt for the new owner
+        transferredStake.rewardDebt = transferredStake.shares * accRewardPerShare / 1e18;
 
-        emit StakeTransferred(from, to, poolId, stakeId);
+        userStakes[to].push(transferredStake);
+
+        // Remove the stake from the original owner
+        userStakes[from][stakeId] = userStakes[from][userStakes[from].length - 1];
+        userStakes[from].pop();
+
+        emit StakeTransferred(from, to, stakeId);
     }
 
     function setMarketplaceAuthorization(address marketplace, bool isAuthorized)
@@ -253,6 +171,6 @@ contract StakingVault is Ownable, ReentrancyGuard {
     }
 
     receive() external payable {
-        distributeRewards();
+        emit RewardsDistributed(msg.value);
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
 import {Contract as UNAIToken} from "../src/UNAI.sol";
@@ -42,11 +42,7 @@ contract Deploy is Script {
         // Authorize the marketplace in the staking contract
         stakingVault.setMarketplaceAuthorization(address(marketplace), true);
 
-        // Add pools to the staking vault
-        stakingVault.addPool(30 days, 10, StakingVault.LockupDuration.ThreeMonths);
-        stakingVault.addPool(90 days, 5, StakingVault.LockupDuration.SixMonths);
-        stakingVault.addPool(365 days, 20, StakingVault.LockupDuration.TwelveMonths);
-        console.log("Staking pools added.");
+        // Note: We no longer need to add pools as the new StakingVault doesn't use them
 
         vm.stopBroadcast();
     }
