@@ -173,6 +173,30 @@ contract StakingVault is Ownable, ReentrancyGuard {
         return rewards - rewardDebt;
     }
 
+    function extendStake(uint256 stakeId, uint256 additionalLockDuration) external nonReentrant {
+        require(stakeId < userStakes[msg.sender].length, "Invalid stake ID");
+        require(additionalLockDuration > 0, "Additional lock duration must be greater than 0");
+
+        Stake storage userStake = userStakes[msg.sender][stakeId];
+        require(
+            block.timestamp < userStake.startTime + userStake.lockDuration,
+            "Cannot extend expired stake"
+        );
+
+        updateRewards();
+
+        uint256 newLockDuration = userStake.lockDuration + additionalLockDuration;
+        uint256 additionalShares = (userStake.amount * additionalLockDuration) / SHARE_TIME_FRAME;
+
+        userStake.lockDuration = newLockDuration;
+        userStake.shares += additionalShares;
+        userStake.rewardDebt = (userStake.shares * accRewardPerShare) / 1e18;
+
+        totalShares += additionalShares;
+
+        emit Staked(msg.sender, stakeId, userStake.amount, newLockDuration);
+    }
+
     function transferStake(address from, address to, uint256 stakeId) external {
         require(authorizedMarketplaces[msg.sender], "Caller is not an authorized marketplace");
         require(stakeId < userStakes[from].length, "Invalid stake ID");

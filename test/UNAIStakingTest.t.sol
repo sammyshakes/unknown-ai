@@ -317,4 +317,63 @@ contract StakingVaultTest is Test {
         console.log("User1 Final Balance:", finalUser1Balance);
         console.log("User2 Final Balance:", finalUser2Balance);
     }
+
+    function test_NoRewardsAfterTimelockExpiration() public {
+        buyTokens(user1, 1 ether);
+
+        // User1 stakes 100 tokens for 30 days
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), 100e18);
+        stakingVault.stake(100e18, 30 days);
+        vm.stopPrank();
+
+        // Advance time by 29 days (just before expiration)
+        vm.warp(block.timestamp + 29 days);
+
+        // Check pending rewards just before expiration
+        uint256 pendingBeforeExpiration = stakingVault.pendingRewards(user1, 0);
+        console.log("Pending rewards before expiration:", pendingBeforeExpiration);
+
+        // Advance time by 2 more days (1 day after expiration)
+        vm.warp(block.timestamp + 2 days);
+
+        // Check pending rewards after expiration
+        uint256 pendingAfterExpiration = stakingVault.pendingRewards(user1, 0);
+        console.log("Pending rewards after expiration:", pendingAfterExpiration);
+
+        // Assert that no additional rewards were accumulated after expiration
+        assertEq(pendingAfterExpiration, pendingBeforeExpiration);
+    }
+
+    function test_ExtendStake() public {
+        buyTokens(user1, 1 ether);
+
+        // User1 stakes 100 tokens for 30 days
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), 100e18);
+        stakingVault.stake(100e18, 30 days);
+        vm.stopPrank();
+
+        // Advance time by 10 days
+        vm.warp(block.timestamp + 10 days);
+
+        // User1 extends the stake by an additional 30 days
+        vm.startPrank(user1);
+        stakingVault.extendStake(0, 30 days);
+        vm.stopPrank();
+
+        // Advance time by 50 more days (total 60 days from start)
+        vm.warp(block.timestamp + 50 days);
+
+        // User1 claims rewards after 60 days
+        vm.startPrank(user1);
+        stakingVault.claimRewards(0);
+        vm.stopPrank();
+
+        // Final checks on the rewards and shares
+        uint256 finalUser1Balance = user1.balance;
+        console.log("User1 Final Balance after extension:", finalUser1Balance);
+
+        // Assertions can be added to ensure shares and rewards are as expected.
+    }
 }
