@@ -21,6 +21,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
     uint256 public accRewardPerShare;
     uint256 public lastUpdateTime;
     uint256 public totalStaked;
+    uint256 public totalRewardsDistributed;
 
     mapping(address => Stake[]) public userStakes;
     mapping(address => address) public stakeApprovals;
@@ -37,20 +38,24 @@ contract StakingVault is Ownable, ReentrancyGuard {
 
     constructor(IERC20 _unaiToken) Ownable(msg.sender) {
         unaiToken = _unaiToken;
+        lastUpdateTime = block.timestamp;
     }
 
     function updateRewards() public {
-        if (block.timestamp <= lastUpdateTime) {
-            return;
-        }
-        if (totalShares == 0) {
-            lastUpdateTime = block.timestamp;
+        if (block.timestamp <= lastUpdateTime || totalShares == 0) {
             return;
         }
 
-        uint256 rewardAmount = address(this).balance;
-        if (rewardAmount > 0) {
-            accRewardPerShare += (rewardAmount * 1e18) / totalShares;
+        uint256 newRewards;
+        if (address(this).balance > totalRewardsDistributed) {
+            newRewards = address(this).balance - totalRewardsDistributed;
+        } else {
+            newRewards = 0;
+        }
+
+        if (newRewards > 0) {
+            accRewardPerShare += (newRewards * 1e18) / totalShares;
+            totalRewardsDistributed += newRewards;
         }
         lastUpdateTime = block.timestamp;
     }
@@ -67,7 +72,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
             startTime: block.timestamp,
             lockDuration: lockDuration,
             shares: shares,
-            rewardDebt: shares * accRewardPerShare / 1e18
+            rewardDebt: (shares * accRewardPerShare) / 1e18
         });
 
         userStakes[msg.sender].push(newStake);
@@ -90,7 +95,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
 
         uint256 amount = userStake.amount;
         uint256 shares = userStake.shares;
-        uint256 pending = (shares * accRewardPerShare / 1e18) - userStake.rewardDebt;
+        uint256 pending = _calculateRewards(shares, userStake.rewardDebt);
 
         totalShares -= shares;
         totalStaked -= amount;
@@ -115,9 +120,9 @@ contract StakingVault is Ownable, ReentrancyGuard {
 
         updateRewards();
 
-        uint256 pending = (userStake.shares * accRewardPerShare / 1e18) - userStake.rewardDebt;
+        uint256 pending = _calculateRewards(userStake.shares, userStake.rewardDebt);
         if (pending > 0) {
-            userStake.rewardDebt = userStake.shares * accRewardPerShare / 1e18;
+            userStake.rewardDebt = (userStake.shares * accRewardPerShare) / 1e18;
             (bool success,) = msg.sender.call{value: pending}("");
             require(success, "ETH transfer failed");
             emit RewardsClaimed(msg.sender, stakeId, pending);
@@ -129,9 +134,43 @@ contract StakingVault is Ownable, ReentrancyGuard {
         Stake storage userStake = userStakes[user][stakeId];
 
         uint256 _accRewardPerShare = accRewardPerShare;
-        uint256 pending = (userStake.shares * _accRewardPerShare / 1e18) - userStake.rewardDebt;
 
-        return pending;
+        uint256 newRewards;
+        if (address(this).balance > totalRewardsDistributed) {
+            newRewards = address(this).balance - totalRewardsDistributed;
+        } else {
+            newRewards = 0;
+        }
+
+        if (newRewards > 0 && totalShares > 0) {
+            _accRewardPerShare += (newRewards * 1e18) / totalShares;
+        }
+
+        uint256 rewards = (userStake.shares * _accRewardPerShare) / 1e18;
+        if (rewards <= userStake.rewardDebt) {
+            return 0;
+        }
+        return rewards - userStake.rewardDebt;
+    }
+
+    function _calculateRewards(uint256 shares, uint256 rewardDebt)
+        internal
+        view
+        returns (uint256)
+    {
+        return _calculateRewards(shares, rewardDebt, accRewardPerShare);
+    }
+
+    function _calculateRewards(uint256 shares, uint256 rewardDebt, uint256 _accRewardPerShare)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 rewards = (shares * _accRewardPerShare) / 1e18;
+        if (rewards <= rewardDebt) {
+            return 0;
+        }
+        return rewards - rewardDebt;
     }
 
     function transferStake(address from, address to, uint256 stakeId) external {
@@ -140,9 +179,8 @@ contract StakingVault is Ownable, ReentrancyGuard {
 
         updateRewards();
 
-        Stake memory transferredStake = userStakes[from][stakeId];
-        uint256 pending =
-            (transferredStake.shares * accRewardPerShare / 1e18) - transferredStake.rewardDebt;
+        Stake storage transferredStake = userStakes[from][stakeId];
+        uint256 pending = _calculateRewards(transferredStake.shares, transferredStake.rewardDebt);
 
         // Transfer any pending rewards to the original owner
         if (pending > 0) {
@@ -151,7 +189,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
         }
 
         // Reset the reward debt for the new owner
-        transferredStake.rewardDebt = transferredStake.shares * accRewardPerShare / 1e18;
+        transferredStake.rewardDebt = (transferredStake.shares * accRewardPerShare) / 1e18;
 
         userStakes[to].push(transferredStake);
 

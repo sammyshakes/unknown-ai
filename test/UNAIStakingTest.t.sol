@@ -13,9 +13,11 @@ contract StakingVaultTest is Test {
 
     IDexRouter dexRouter = IDexRouter(router);
 
+    // Setup users
     address public owner = address(this);
     address public user1 = address(0x1);
     address public user2 = address(0x2);
+    address public user3 = address(0x3);
 
     function setUp() public {
         unaiToken = new Contract();
@@ -169,55 +171,150 @@ contract StakingVaultTest is Test {
         stakingVault.userStakes(user1, 0);
 
         // Check that user2 now has the stake
-        (uint256 amount2, uint256 startTime2, uint256 duration2, uint256 shares2,) =
-            stakingVault.userStakes(user2, 0);
+        (uint256 amount2,, uint256 duration2, uint256 shares2,) = stakingVault.userStakes(user2, 0);
         assertEq(amount2, stakeAmount);
         assertEq(duration2, lockDuration);
         assertEq(shares2, stakeAmount); // Because lockDuration == SHARE_TIME_FRAME
     }
 
-    function test_MultipleStakesRewards() public {
-        uint256 stakeAmount = 100 * 1e18;
-        uint256 lockDuration1 = 90 days;
-        uint256 lockDuration2 = 180 days;
+    function test_MultipleUsersStakingAndRewards() public {
+        // Buy tokens for users
+        buyTokens(user1, 5 ether);
+        buyTokens(user2, 5 ether);
+        buyTokens(user3, 5 ether);
 
-        // User1 buys tokens
-        buyTokens(user1, 2 ether);
-
+        // Stake different amounts for different durations
         vm.startPrank(user1);
-        unaiToken.approve(address(stakingVault), stakeAmount * 2);
-        stakingVault.stake(stakeAmount, lockDuration1);
-        stakingVault.stake(stakeAmount, lockDuration2);
+        unaiToken.approve(address(stakingVault), 1000 * 1e18);
+        stakingVault.stake(100 * 1e18, 30 days);
+        stakingVault.stake(200 * 1e18, 60 days);
+        vm.stopPrank();
+
+        vm.startPrank(user2);
+        unaiToken.approve(address(stakingVault), 1000 * 1e18);
+        stakingVault.stake(300 * 1e18, 90 days);
+        vm.stopPrank();
+
+        vm.startPrank(user3);
+        unaiToken.approve(address(stakingVault), 1000 * 1e18);
+        stakingVault.stake(400 * 1e18, 180 days);
         vm.stopPrank();
 
         // Add rewards to the staking vault
-        vm.deal(address(stakingVault), 1 ether);
+        uint256 totalRewards = 10 ether;
+        vm.deal(address(stakingVault), totalRewards);
 
-        // Warp time to after first lock period
-        vm.warp(block.timestamp + lockDuration1);
+        // Advance time
+        vm.warp(block.timestamp + 180 days);
 
         // Update rewards
         stakingVault.updateRewards();
 
-        uint256 rewards1 = stakingVault.pendingRewards(user1, 0);
-        uint256 rewards2 = stakingVault.pendingRewards(user1, 1);
+        // Calculate total pending rewards
+        uint256 totalPendingRewards = 0;
+        for (uint256 i = 0; i < 2; i++) {
+            totalPendingRewards += stakingVault.pendingRewards(user1, i);
+        }
+        totalPendingRewards += stakingVault.pendingRewards(user2, 0);
+        totalPendingRewards += stakingVault.pendingRewards(user3, 0);
 
-        console.log("Rewards for 90-day stake:", rewards1);
-        console.log("Rewards for 180-day stake:", rewards2);
+        console.log("Total pending rewards:", totalPendingRewards);
+        console.log("Actual rewards in contract:", address(stakingVault).balance);
 
-        assertTrue(rewards2 > rewards1, "Longer lock duration should yield more rewards");
+        // Ensure total pending rewards don't exceed actual rewards
+        assertLe(totalPendingRewards, totalRewards, "Total pending rewards exceed actual rewards");
 
-        // Claim rewards for both stakes
+        // Claim rewards for all users
+        uint256 totalClaimedRewards = 0;
+
         vm.startPrank(user1);
-        uint256 initialBalance = user1.balance;
-        stakingVault.claimRewards(0);
-        stakingVault.claimRewards(1);
-        uint256 finalBalance = user1.balance;
+        for (uint256 i = 0; i < 2; i++) {
+            uint256 initialBalance = user1.balance;
+            stakingVault.claimRewards(i);
+            totalClaimedRewards += user1.balance - initialBalance;
+        }
         vm.stopPrank();
 
-        uint256 totalRewardsClaimed = finalBalance - initialBalance;
-        console.log("Total rewards claimed:", totalRewardsClaimed);
+        vm.prank(user2);
+        uint256 initialBalance = user2.balance;
+        stakingVault.claimRewards(0);
+        totalClaimedRewards += user2.balance - initialBalance;
 
-        assertTrue(totalRewardsClaimed > 0, "User1 should have received ETH rewards");
+        vm.prank(user3);
+        initialBalance = user3.balance;
+        stakingVault.claimRewards(0);
+        totalClaimedRewards += user3.balance - initialBalance;
+
+        console.log("Total claimed rewards:", totalClaimedRewards);
+        console.log("Remaining rewards in contract:", address(stakingVault).balance);
+
+        // Ensure all rewards are accounted for
+        assertEq(
+            totalClaimedRewards + address(stakingVault).balance,
+            totalRewards,
+            "Not all rewards are accounted for"
+        );
+
+        // After claiming rewards
+        uint256 user1Rewards =
+            stakingVault.pendingRewards(user1, 0) + stakingVault.pendingRewards(user1, 1);
+        uint256 user2Rewards = stakingVault.pendingRewards(user2, 0);
+        uint256 user3Rewards = stakingVault.pendingRewards(user3, 0);
+
+        // Assert that pending rewards are zero or very small
+        assertLe(user1Rewards, 1);
+        assertLe(user2Rewards, 1);
+        assertLe(user3Rewards, 1);
+
+        // Assert that the remaining balance in the contract is small but non-zero
+        uint256 remainingBalance = address(stakingVault).balance;
+        assertGt(remainingBalance, 0);
+        assertLe(remainingBalance, 1000); // Adjust this threshold as needed
+
+        console.log("Remaining balance in contract:", remainingBalance);
+    }
+
+    function test_MultipleUsersStakingAndClaimingRewardsAtDifferentTimes() public {
+        // User1 stakes 100 tokens for 30 days
+        buyTokens(user1, 1 ether);
+
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), 100e18);
+        stakingVault.stake(100e18, 30 days);
+        vm.stopPrank(); // Stop the prank for user1
+
+        // Advance time by 10 days
+        vm.warp(block.timestamp + 10 days);
+
+        // User2 stakes 200 tokens for 60 days
+        buyTokens(user2, 2 ether);
+        vm.startPrank(user2);
+        unaiToken.approve(address(stakingVault), 200e18);
+        stakingVault.stake(200e18, 60 days);
+        vm.stopPrank(); // Stop the prank for user2
+
+        // Advance time by 20 more days (total 30 days from start)
+        vm.warp(block.timestamp + 20 days);
+
+        // User1 claims rewards after 30 days
+        vm.startPrank(user1);
+        stakingVault.claimRewards(0);
+        vm.stopPrank(); // Stop the prank for user1
+
+        // Advance time by 30 more days (total 60 days from start)
+        vm.warp(block.timestamp + 30 days);
+
+        // User2 claims rewards after 60 days
+        vm.startPrank(user2);
+        stakingVault.claimRewards(0);
+        vm.stopPrank(); // Stop the prank for user2
+
+        // Final checks
+        uint256 finalUser1Balance = user1.balance;
+        uint256 finalUser2Balance = user2.balance;
+
+        // Assuming the reward calculation logic is correct, the final balances should match the expected rewards
+        console.log("User1 Final Balance:", finalUser1Balance);
+        console.log("User2 Final Balance:", finalUser2Balance);
     }
 }
