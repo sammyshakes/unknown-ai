@@ -328,6 +328,7 @@ contract Contract is ERC20, Ownable {
     bool public limitsInEffect = true;
     bool public tradingActive = false;
     bool public swapEnabled = false;
+    bool public swapStakingEnabled = false;
 
     // Anti-bot and anti-whale mappings and variables
     mapping(address => uint256) private _holderLastTransferTimestamp; // to hold last Transfers temporarily during launch
@@ -403,11 +404,11 @@ contract Contract is ERC20, Ownable {
         maxWalletAmount = totalSupply * 2 / 100;
         swapTokensAtAmount = totalSupply * 5 / 10_000;
 
-        buyOperationsFee = 2;
+        buyOperationsFee = 8;
         buyLiquidityFee = 1;
         buyDevFee = 0;
         buyBurnFee = 0;
-        buyStakingRewardsFee = 2;
+        buyStakingRewardsFee = 0;
         buyTotalFees =
             buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
 
@@ -415,7 +416,7 @@ contract Contract is ERC20, Ownable {
         sellLiquidityFee = 1;
         sellDevFee = 0;
         sellBurnFee = 0;
-        sellStakingRewardsFee = 2;
+        sellStakingRewardsFee = 1;
         sellTotalFees =
             sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
 
@@ -588,20 +589,20 @@ contract Contract is ERC20, Ownable {
     }
 
     function returnToNormalTax() external onlyOwner {
-        sellOperationsFee = 0;
-        sellLiquidityFee = 0;
+        sellOperationsFee = 2;
+        sellLiquidityFee = 1;
         sellDevFee = 0;
         sellBurnFee = 0;
-        sellStakingRewardsFee = 0;
+        sellStakingRewardsFee = 1;
         sellTotalFees =
             sellOperationsFee + sellLiquidityFee + sellDevFee + sellBurnFee + sellStakingRewardsFee;
         require(sellTotalFees <= 10, "Must keep fees at 10% or less");
 
-        buyOperationsFee = 0;
-        buyLiquidityFee = 0;
+        buyOperationsFee = 2;
+        buyLiquidityFee = 1;
         buyDevFee = 0;
         buyBurnFee = 0;
-        buyStakingRewardsFee = 0;
+        buyStakingRewardsFee = 1;
         buyTotalFees =
             buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
         require(buyTotalFees <= 10, "Must keep fees at 10% or less");
@@ -775,8 +776,11 @@ contract Contract is ERC20, Ownable {
         tokensForBurn = 0;
 
         uint256 contractBalance = balanceOf(address(this));
-        uint256 totalTokensToSwap =
-            tokensForLiquidity + tokensForOperations + tokensForDev + tokensForStaking;
+        uint256 totalTokensToSwap = tokensForLiquidity + tokensForOperations + tokensForDev;
+
+        if (swapStakingEnabled) {
+            totalTokensToSwap += tokensForStaking;
+        }
 
         if (contractBalance == 0 || totalTokensToSwap == 0) return;
 
@@ -798,15 +802,23 @@ contract Contract is ERC20, Ownable {
             ethBalance * tokensForOperations / (totalTokensToSwap - (tokensForLiquidity / 2));
         uint256 ethForDev =
             ethBalance * tokensForDev / (totalTokensToSwap - (tokensForLiquidity / 2));
-        uint256 ethForStaking =
-            ethBalance * tokensForStaking / (totalTokensToSwap - (tokensForLiquidity / 2));
+
+        uint256 ethForStaking = 0;
+        if (swapStakingEnabled) {
+            ethForStaking =
+                ethBalance * tokensForStaking / (totalTokensToSwap - (tokensForLiquidity / 2));
+        }
 
         ethForLiquidity -= ethForOperations + ethForDev + ethForStaking;
 
         tokensForLiquidity = 0;
         tokensForOperations = 0;
         tokensForDev = 0;
-        tokensForStaking = 0;
+
+        // Reset staking tokens only when swap is enabled
+        if (swapStakingEnabled) {
+            tokensForStaking = 0;
+        }
 
         if (liquidityTokens > 0 && ethForLiquidity > 0) {
             addLiquidity(liquidityTokens, ethForLiquidity);
@@ -814,7 +826,11 @@ contract Contract is ERC20, Ownable {
 
         (success,) = address(devAddress).call{value: ethForDev}("");
         (success,) = address(operationsAddress).call{value: address(this).balance}("");
-        (success,) = address(stakingContract).call{value: ethForStaking}("");
+
+        // Swap staking rewards only if staking swap is enabled
+        if (swapStakingEnabled) {
+            (success,) = address(stakingContract).call{value: ethForStaking}("");
+        }
     }
 
     function transferForeignToken(address _token, address _to)
@@ -881,5 +897,13 @@ contract Contract is ERC20, Ownable {
             block.timestamp
         );
         emit BuyBackTriggered(amountInWei);
+    }
+
+    function setSwapEnabled(bool _enabled) external onlyOwner {
+        swapEnabled = _enabled;
+    }
+
+    function setSwapStakingEnabled(bool _enabled) external onlyOwner {
+        swapStakingEnabled = _enabled;
     }
 }

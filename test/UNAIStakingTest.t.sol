@@ -376,4 +376,103 @@ contract StakingVaultTest is Test {
 
         // Assertions can be added to ensure shares and rewards are as expected.
     }
+
+    function test_ExtendStakeRewardAccuracy() public {
+        uint256 initialStakeAmount = 100e18;
+        uint256 initialLockDuration = 30 days;
+        uint256 extensionDuration = 60 days;
+
+        // User1 buys tokens and stakes
+        buyTokens(user1, 1 ether);
+        vm.startPrank(user1);
+        unaiToken.approve(address(stakingVault), initialStakeAmount);
+        stakingVault.stake(initialStakeAmount, initialLockDuration);
+        vm.stopPrank();
+
+        console.log("Initial timestamp:", block.timestamp);
+        console.log("Initial total shares:", stakingVault.totalShares());
+
+        uint256 totalFees = 0;
+
+        // Simulate transaction fees over 15 days
+        for (uint256 i = 0; i < 15; i++) {
+            vm.warp(block.timestamp + 1 days);
+            uint256 dailyFees = 0.1 ether * (1 + i % 5); // Varying daily fees
+            totalFees += dailyFees;
+
+            try vm.deal(address(this), dailyFees) {
+                (bool success,) = address(stakingVault).call{value: dailyFees}("");
+                require(success, "ETH transfer failed");
+            } catch {
+                console.log("Failed to send fees on day", i + 1);
+            }
+        }
+
+        console.log("Timestamp after 15 days:", block.timestamp);
+        console.log("Total fees sent in first 15 days:", totalFees);
+
+        // Check pending rewards before extension
+        uint256 pendingRewardsBeforeExtension = stakingVault.pendingRewards(user1, 0);
+        console.log("Pending rewards before extension:", pendingRewardsBeforeExtension);
+
+        // Extend the stake
+        vm.prank(user1);
+        stakingVault.extendStake(0, extensionDuration);
+
+        // Check pending rewards immediately after extension
+        uint256 pendingRewardsAfterExtension = stakingVault.pendingRewards(user1, 0);
+        console.log("Pending rewards after extension:", pendingRewardsAfterExtension);
+        console.log("Total shares after extension:", stakingVault.totalShares());
+
+        // Ensure rewards didn't change due to extension
+        assertEq(
+            pendingRewardsBeforeExtension,
+            pendingRewardsAfterExtension,
+            "Rewards should not change immediately after extension"
+        );
+
+        // Simulate transaction fees over the next 75 days
+        for (uint256 i = 0; i < 75; i++) {
+            vm.warp(block.timestamp + 1 days);
+            uint256 dailyFees = 0.05 ether * (1 + i % 7); // Varying daily fees
+            totalFees += dailyFees;
+
+            try vm.deal(address(this), dailyFees) {
+                (bool success,) = address(stakingVault).call{value: dailyFees}("");
+                require(success, "ETH transfer failed");
+            } catch {
+                console.log("Failed to send fees on day", i + 16);
+            }
+        }
+
+        console.log("Final timestamp:", block.timestamp);
+        console.log("Total fees sent:", totalFees);
+
+        // Check final pending rewards
+        uint256 finalPendingRewards = stakingVault.pendingRewards(user1, 0);
+        console.log("Final pending rewards:", finalPendingRewards);
+
+        // Claim rewards and check received amount
+        uint256 initialBalance = user1.balance;
+        vm.prank(user1);
+        stakingVault.claimRewards(0);
+        uint256 claimedRewards = user1.balance - initialBalance;
+
+        console.log("Claimed rewards:", claimedRewards);
+
+        // Check that pending rewards are now zero or very small
+        uint256 pendingRewardsAfterClaim = stakingVault.pendingRewards(user1, 0);
+        console.log("Pending rewards after claim:", pendingRewardsAfterClaim);
+        assertLe(pendingRewardsAfterClaim, 1e14, "Pending rewards after claim should be very small");
+
+        // Verify total rewards distributed
+        uint256 remainingBalance = address(stakingVault).balance;
+        console.log("Remaining balance in staking vault:", remainingBalance);
+        assertApproxEqRel(
+            claimedRewards + remainingBalance,
+            totalFees,
+            1e16,
+            "Total distributed rewards should match total fees sent"
+        );
+    }
 }

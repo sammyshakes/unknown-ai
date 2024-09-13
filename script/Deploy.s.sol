@@ -13,7 +13,7 @@ contract Deploy is Script {
 
     uint256 deployerPrivateKey = uint256(vm.envBytes32("DEPLOYER_PRIVATE_KEY"));
 
-    // You'll need to set this address for the network you're deploying to
+    // Set dex router for the network being deploying to
     address constant DEX_ROUTER = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008);
     // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D //mainnet
     // 0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008 //sepolia

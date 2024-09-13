@@ -176,25 +176,31 @@ contract StakingVault is Ownable, ReentrancyGuard {
     function extendStake(uint256 stakeId, uint256 additionalLockDuration) external nonReentrant {
         require(stakeId < userStakes[msg.sender].length, "Invalid stake ID");
         require(additionalLockDuration > 0, "Additional lock duration must be greater than 0");
+        require(additionalLockDuration <= 365 days, "Cannot extend more than 365 days");
 
         Stake storage userStake = userStakes[msg.sender][stakeId];
-        require(
-            block.timestamp < userStake.startTime + userStake.lockDuration,
-            "Cannot extend expired stake"
-        );
+        uint256 currentTime = block.timestamp;
+        uint256 stakeEndTime = userStake.startTime + userStake.lockDuration;
+
+        require(currentTime < stakeEndTime, "Cannot extend expired stake");
 
         updateRewards();
 
-        uint256 newLockDuration = userStake.lockDuration + additionalLockDuration;
+        // Calculate pending rewards before extension
+        uint256 pendingRewards =
+            (userStake.shares * accRewardPerShare) / 1e18 - userStake.rewardDebt;
+
+        uint256 remainingDuration = stakeEndTime > currentTime ? stakeEndTime - currentTime : 0;
+        uint256 newLockDuration = remainingDuration + additionalLockDuration;
         uint256 additionalShares = (userStake.amount * additionalLockDuration) / SHARE_TIME_FRAME;
 
         userStake.lockDuration = newLockDuration;
         userStake.shares += additionalShares;
-        userStake.rewardDebt = (userStake.shares * accRewardPerShare) / 1e18;
+
+        // Update reward debt to include pending rewards
+        userStake.rewardDebt = ((userStake.shares * accRewardPerShare) / 1e18) - pendingRewards;
 
         totalShares += additionalShares;
-
-        emit Staked(msg.sender, stakeId, userStake.amount, newLockDuration);
     }
 
     function transferStake(address from, address to, uint256 stakeId) external {
@@ -233,6 +239,7 @@ contract StakingVault is Ownable, ReentrancyGuard {
     }
 
     receive() external payable {
+        updateRewards();
         emit RewardsDistributed(msg.value);
     }
 }

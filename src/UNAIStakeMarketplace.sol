@@ -130,6 +130,7 @@ contract UNAIStakeMarketplace is ReentrancyGuard, Ownable {
         stakingVault.transferStake(listing.seller, msg.sender, listing.stakeId);
 
         // Swap fee tokens for ETH
+        // TODO: Do not sell for eth, instead keep in contract and allow owner to withdraw
         swapTokensForEth(feeAmount);
 
         emit ListingFulfilled(listingId, msg.sender);
