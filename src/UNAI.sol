@@ -397,7 +397,7 @@ contract Contract is ERC20, Ownable {
         _excludeFromMaxTransaction(address(lpPair), true);
         _setAutomatedMarketMakerPair(address(lpPair), true);
 
-        uint256 totalSupply = 10 * 1e6 * 1e18;
+        uint256 totalSupply = 100 * 1e6 * 1e18;
 
         maxBuyAmount = totalSupply * 2 / 100;
         maxSellAmount = totalSupply * 2 / 100;

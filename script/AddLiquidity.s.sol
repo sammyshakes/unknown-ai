@@ -35,6 +35,7 @@ interface IDexRouter {
 
 contract AddLiquidity is Script {
     uint256 deployerPrivateKey = uint256(vm.envBytes32("DEPLOYER_PRIVATE_KEY"));
+    address deployerAddress = address(vm.envAddress("DEPLOYER_ADDRESS"));
 
     // Set dex router for the network being deploying to
     address constant DEX_ROUTER_ADDRESS = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008);
@@ -68,7 +69,7 @@ contract AddLiquidity is Script {
             TOKEN_AMOUNT, // Amount of tokens
             0, // Min tokens to add (slippage)
             0, // Min ETH to add (slippage)
-            address(this), // Receiver of liquidity tokens
+            address(deployerAddress), // Receiver of liquidity tokens
             block.timestamp + 300 // Deadline (300 seconds from now)
         );
 

@@ -154,7 +154,7 @@ contract UNAITest is Test {
         uint256 sellAmount = 1000 * 1e18;
 
         // Lower the swap threshold to allow the swap to happen
-        unaiToken.updateSwapTokensAtAmount(500 * 1e18); // Set a lower threshold
+        unaiToken.updateSwapTokensAtAmount(1000 ether); // Set a lower threshold
 
         // User1 buys tokens and then sells them
         buyTokens(user1, 1 ether);
@@ -228,9 +228,9 @@ contract UNAITest is Test {
         unaiToken.setSwapStakingEnabled(false);
 
         // Set a lower swap threshold to easily trigger the swap
-        unaiToken.updateSwapTokensAtAmount(500 * 1e18);
+        unaiToken.updateSwapTokensAtAmount(1000 ether);
 
-        uint256 sellAmount = 1000 * 1e18;
+        uint256 sellAmount = 1000 ether;
 
         // User1 buys tokens and then sells them
         buyTokens(user1, 1 ether);
@@ -272,9 +272,9 @@ contract UNAITest is Test {
 
     function test_StakingRewardsSwapWhenEnabled() public {
         // Set a lower swap threshold to easily trigger the swap
-        unaiToken.updateSwapTokensAtAmount(500 * 1e18);
+        unaiToken.updateSwapTokensAtAmount(1000 ether);
 
-        uint256 sellAmount = 1000 * 1e18;
+        uint256 sellAmount = 1000 ether;
 
         // User1 buys tokens and then sells them
         buyTokens(user1, 1 ether);
