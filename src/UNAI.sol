@@ -385,11 +385,11 @@ contract Contract is ERC20, Ownable {
     event StakingContractUpdated(address indexed newStakingContract);
     event StakingTokensSent(uint256 tokensSent);
 
-    constructor() ERC20("Unknown AI", "UNAI") {
+    constructor() ERC20(unicode"Unknown AI", unicode"UNAI") {
         address newOwner = msg.sender; // can leave alone if owner is deployer.
 
-        // IDexRouter _dexRouter = IDexRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); //mainnet
-        IDexRouter _dexRouter = IDexRouter(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); //sepolia
+        IDexRouter _dexRouter = IDexRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); //mainnet
+        // IDexRouter _dexRouter = IDexRouter(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); //sepolia
         dexRouter = _dexRouter;
 
         // create pair
@@ -402,17 +402,17 @@ contract Contract is ERC20, Ownable {
         maxBuyAmount = totalSupply * 2 / 100;
         maxSellAmount = totalSupply * 2 / 100;
         maxWalletAmount = totalSupply * 2 / 100;
-        swapTokensAtAmount = totalSupply * 5 / 10_000;
+        swapTokensAtAmount = totalSupply * 10 / 10_000;
 
         buyOperationsFee = 8;
         buyLiquidityFee = 1;
         buyDevFee = 0;
         buyBurnFee = 0;
-        buyStakingRewardsFee = 0;
+        buyStakingRewardsFee = 1;
         buyTotalFees =
             buyOperationsFee + buyLiquidityFee + buyDevFee + buyBurnFee + buyStakingRewardsFee;
 
-        sellOperationsFee = 2;
+        sellOperationsFee = 8;
         sellLiquidityFee = 1;
         sellDevFee = 0;
         sellBurnFee = 0;
@@ -428,7 +428,7 @@ contract Contract is ERC20, Ownable {
         excludeFromFees(address(this), true);
         excludeFromFees(address(0xdead), true);
 
-        operationsAddress = address(newOwner);
+        operationsAddress = address(0x22c46a0f5DFb6Bb6f1BB4835BA139bDAD9AaC178);
         devAddress = address(newOwner);
 
         _createInitialSupply(newOwner, totalSupply);

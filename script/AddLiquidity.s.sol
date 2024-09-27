@@ -38,14 +38,14 @@ contract AddLiquidity is Script {
     address deployerAddress = address(vm.envAddress("DEPLOYER_ADDRESS"));
 
     // Set dex router for the network being deploying to
-    address constant DEX_ROUTER_ADDRESS = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008);
+    address constant DEX_ROUTER_ADDRESS = address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
     // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D //mainnet
     // 0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008 //sepolia
 
     // Load environment variables
-    address constant UNAI_TOKEN_ADDRESS = address(0x0); // Enter UNAI token address
-    uint256 constant ETH_AMOUNT = 2 ether; // Enter ETH amount
-    uint256 constant TOKEN_AMOUNT = 1_000_000 ether; // Enter token amount
+    address public UNAI_TOKEN_ADDRESS = address(vm.envAddress("UNAI_TOKEN_ADDRESS"));
+    uint256 constant ETH_AMOUNT = 1.96 ether; // Enter ETH amount
+    uint256 constant TOKEN_AMOUNT = 100_000_000 ether; // Enter token amount
 
     IERC20 unaiToken;
     IDexRouter dexRouter;
