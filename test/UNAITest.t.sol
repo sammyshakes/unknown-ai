@@ -21,7 +21,7 @@ contract UNAITest is Test {
     function setUp() public {
         // Deploy the UNAI token contract
         unaiToken = new Contract();
-        stakingVault = new StakingVault(IERC20(address(unaiToken)));
+        stakingVault = new StakingVault(address(unaiToken));
         unaiToken.setStakingContract(address(stakingVault));
 
         // Enable staking swap

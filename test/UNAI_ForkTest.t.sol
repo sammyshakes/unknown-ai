@@ -59,7 +59,7 @@ contract UNAIForkTest is Test {
     function setUp() public {
         // Connect to deployed contracts
         unaiToken = IUNAI(UNAI_ADDRESS);
-        stakingVault = new StakingVault(IERC20(address(unaiToken)));
+        stakingVault = new StakingVault(address(unaiToken));
         dexRouter = IDexRouter(DEX_ROUTER_ADDRESS);
 
         // Optionally, impersonate the owner if required for certain actions

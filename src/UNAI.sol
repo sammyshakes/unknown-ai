@@ -388,8 +388,8 @@ contract Contract is ERC20, Ownable {
     constructor() ERC20(unicode"Unknown AI", unicode"UNAI") {
         address newOwner = msg.sender; // can leave alone if owner is deployer.
 
-        IDexRouter _dexRouter = IDexRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); //mainnet
-        // IDexRouter _dexRouter = IDexRouter(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); //sepolia
+        // IDexRouter _dexRouter = IDexRouter(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); //mainnet
+        IDexRouter _dexRouter = IDexRouter(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); //sepolia
         dexRouter = _dexRouter;
 
         // create pair

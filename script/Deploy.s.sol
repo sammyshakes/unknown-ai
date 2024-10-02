@@ -13,6 +13,8 @@ contract Deploy is Script {
 
     uint256 deployerPrivateKey = uint256(vm.envBytes32("DEPLOYER_PRIVATE_KEY"));
 
+    address UNAI_TOKEN_ADDRESS = address(vm.envAddress("UNAI_TOKEN_ADDRESS"));
+
     // Set dex router for the network being deploying to
     address constant DEX_ROUTER = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008);
     // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D //mainnet
@@ -23,12 +25,8 @@ contract Deploy is Script {
     function run() public {
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy UNAI token contract
-        unaiToken = new UNAIToken();
-        console.log("UNAI Token deployed at:", address(unaiToken));
-
         // Deploy StakingVault contract
-        stakingVault = new StakingVault(IERC20(address(unaiToken)));
+        stakingVault = new StakingVault(UNAI_TOKEN_ADDRESS);
         console.log("StakingVault deployed at:", address(stakingVault));
 
         // Set the staking contract in the UNAI token contract

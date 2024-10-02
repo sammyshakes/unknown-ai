@@ -27,7 +27,7 @@ contract StakeMarketplaceTest is Test {
     function setUp() public {
         console.log("Setting up test environment...");
         unaiToken = new Contract();
-        stakingVault = new StakingVault(IERC20(address(unaiToken)));
+        stakingVault = new StakingVault(address(unaiToken));
         marketplace =
             new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER);
         dexRouter = IDexRouter(DEX_ROUTER);
