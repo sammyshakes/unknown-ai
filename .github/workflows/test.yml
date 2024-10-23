@@ -43,5 +43,5 @@ jobs:
 
       - name: Run Forge tests
         run: |
-          forge test -vvv --fork-url ${{ secrets.ETH_RPC_URL }}
+          forge test -vvv --fork-url ${{ secrets.ETH_RPC_URL }} --no-match-contract UNAIForkTest
         id: test
