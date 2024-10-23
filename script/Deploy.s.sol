@@ -13,7 +13,7 @@ contract Deploy is Script {
 
     uint256 deployerPrivateKey = uint256(vm.envBytes32("DEPLOYER_PRIVATE_KEY"));
 
-    address UNAI_TOKEN_ADDRESS = address(vm.envAddress("UNAI_TOKEN_ADDRESS"));
+    address payable UNAI_TOKEN_ADDRESS = payable(vm.envAddress("UNAI_TOKEN_ADDRESS"));
 
     // Set dex router for the network being deploying to
     address constant DEX_ROUTER = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008);
@@ -25,6 +25,9 @@ contract Deploy is Script {
     function run() public {
         vm.startBroadcast(deployerPrivateKey);
 
+        // Deploy UNAI token contract
+        unaiToken = UNAIToken(UNAI_TOKEN_ADDRESS);
+
         // Deploy StakingVault contract
         stakingVault = new StakingVault(UNAI_TOKEN_ADDRESS);
         console.log("StakingVault deployed at:", address(stakingVault));
@@ -32,15 +35,13 @@ contract Deploy is Script {
         // Set the staking contract in the UNAI token contract
         unaiToken.setStakingContract(address(stakingVault));
 
-        // Deploy UNAIStakeMarketplace contract with DEX router address
-        marketplace =
-            new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER);
-        console.log("UNAIStakeMarketplace deployed at:", address(marketplace));
+        // // Deploy UNAIStakeMarketplace contract with DEX router address
+        // marketplace =
+        //     new UNAIStakeMarketplace(address(stakingVault), address(unaiToken), DEX_ROUTER);
+        // console.log("UNAIStakeMarketplace deployed at:", address(marketplace));
 
-        // Authorize the marketplace in the staking contract
-        stakingVault.setMarketplaceAuthorization(address(marketplace), true);
-
-        // Note: We no longer need to add pools as the new StakingVault doesn't use them
+        // // Authorize the marketplace in the staking contract
+        // stakingVault.setMarketplaceAuthorization(address(marketplace), true);
 
         vm.stopBroadcast();
     }

@@ -110,7 +110,7 @@ contract StakeMarketplaceTest is Test {
         assertTrue(fulfilled);
 
         // Check if stake was transferred
-        (uint256 amount,,,,) = stakingVault.userStakes(user2, 0);
+        (uint256 amount,,,,,) = stakingVault.userStakes(user2, 0);
         console.log("User2 stake amount after fulfillment:", amount / 1e18);
         assertEq(amount, stakeAmount);
     }
