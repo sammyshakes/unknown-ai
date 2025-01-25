@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
-import {UNAI as UNAIV2Token} from "../src/UNAIV2.sol";
+import {Contract as UNAIV2Token} from "../src/UNAI.sol";
 import {UNAIMigration} from "../src/UNAIMigration.sol";
 
 contract DeployV2Migration is Script {
@@ -39,10 +39,6 @@ contract DeployV2Migration is Script {
         uint256 totalSupply = unaiV2Token.totalSupply();
         unaiV2Token.transfer(address(migration), totalSupply);
         console.log("Transferred", totalSupply, "V2 tokens to migration contract");
-
-        // Set migration contract as tax exempt to avoid fees during migration
-        unaiV2Token.setTaxExempt(address(migration), true);
-        console.log("Set migration contract as tax exempt");
 
         vm.stopBroadcast();
 
