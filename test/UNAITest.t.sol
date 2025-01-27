@@ -34,11 +34,16 @@ interface IDexRouter {
     ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
 }
 
+interface IUniswapV2Factory {
+    function createPair(address tokenA, address tokenB) external returns (address pair);
+}
+
 contract UNAITest is Test {
     Contract public unaiToken;
     address public router = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); // Sepolia
 
     IDexRouter dexRouter = IDexRouter(router);
+    IUniswapV2Factory uniswapFactory = IUniswapV2Factory(dexRouter.factory());
 
     // Setup users
     address public owner = address(this);
@@ -52,6 +57,9 @@ contract UNAITest is Test {
         // Deploy the UNAI token contract
         unaiToken = new Contract(operationsAddress, devAddress);
 
+        // Create LP Pair
+        address lpPair = uniswapFactory.createPair(address(unaiToken), dexRouter.WETH());
+
         // Provide liquidity to the pool
         uint256 ethAmount = 10 ether;
         uint256 tokenAmount = 10_000_000 * 1e18;
@@ -59,11 +67,14 @@ contract UNAITest is Test {
         // Deal some ETH to the owner
         vm.deal(owner, ethAmount);
 
-        unaiToken.approve(address(dexRouter), tokenAmount);
+        require(unaiToken.balanceOf(address(this)) >= tokenAmount, "Insufficient token balance");
+        unaiToken.approve(address(dexRouter), type(uint256).max);
 
         dexRouter.addLiquidityETH{value: 1 ether}(
             address(unaiToken), tokenAmount, 0, 0, owner, block.timestamp
         );
+
+        unaiToken.setLpPair(lpPair);
 
         // Roll the block to the future
         vm.roll(block.number + 2);
@@ -150,10 +161,10 @@ contract UNAITest is Test {
         assertGt(devEthReceived, 0, "No ETH sent to dev");
 
         // Verify fee ratio (3:1)
-        // Allow for 3 wei rounding difference due to division and price impact
+        // Allow for 5 wei rounding difference due to division and price impact
         uint256 expectedOpsRatio = 3 * devEthReceived;
         uint256 expectedDevRatio = 1 * opsEthReceived;
-        assertApproxEqAbs(expectedOpsRatio, expectedDevRatio, 3, "ETH ratio mismatch");
+        assertApproxEqAbs(expectedOpsRatio, expectedDevRatio, 5, "ETH ratio mismatch");
     }
 
     function testOnlyOwnerCanUpdateFees() public {

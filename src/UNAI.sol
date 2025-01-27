@@ -87,7 +87,6 @@ contract Contract is ERC20, Ownable {
         // ---------------------------------------
         // dexRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); //mainnet
         dexRouter = IUniswapV2Router02(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); //sepolia
-        lpPair = IUniswapV2Factory(dexRouter.factory()).createPair(address(this), dexRouter.WETH());
 
         // ---------------------------------------
         // Mint total supply to owner
@@ -138,6 +137,11 @@ contract Contract is ERC20, Ownable {
 
     function setSwapEnabled(bool enabled) external onlyOwner {
         swapEnabled = enabled;
+    }
+
+    function setLpPair(address _lpPair) external onlyOwner {
+        require(_lpPair != address(0), "LP Pair address cannot be zero");
+        lpPair = _lpPair;
     }
 
     // ---------------------------------------
