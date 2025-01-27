@@ -19,6 +19,7 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
@@ -28,7 +29,7 @@ interface IERC20 {
         returns (bool);
 }
 
-contract UNAIMigration is Ownable, ReentrancyGuard {
+contract UNAIMigration is Ownable, ReentrancyGuard, Pausable {
     IERC20 public immutable unaiV1;
     IERC20 public immutable unaiV2;
 
@@ -55,7 +56,7 @@ contract UNAIMigration is Ownable, ReentrancyGuard {
      * @dev Allows users to migrate their V1 tokens to V2 tokens
      * @param amount The amount of tokens to migrate
      */
-    function migrateTokens(uint256 amount) external nonReentrant {
+    function migrateTokens(uint256 amount) external nonReentrant whenNotPaused {
         require(amount > 0, "Amount must be greater than 0");
         require(unaiV2.balanceOf(address(this)) >= amount, "Insufficient V2 tokens in contract");
 
@@ -108,5 +109,20 @@ contract UNAIMigration is Ownable, ReentrancyGuard {
      */
     function getV2Balance() external view returns (uint256) {
         return unaiV2.balanceOf(address(this));
+    }
+
+    /**
+     * @dev Pauses token migration
+     * Can be used to temporarily or permanently end the migration period
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @dev Unpauses token migration
+     */
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }

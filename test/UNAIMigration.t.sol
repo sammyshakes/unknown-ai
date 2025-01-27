@@ -163,6 +163,73 @@ contract UNAIMigrationTest is Test {
         );
     }
 
+    function testPauseAndUnpause() public {
+        // Test pause
+        migration.pause();
+        assertTrue(migration.paused(), "Contract should be paused");
+
+        // Test unpause
+        migration.unpause();
+        assertFalse(migration.paused(), "Contract should be unpaused");
+    }
+
+    function test_RevertWhen_NonOwnerPauses() public {
+        vm.startPrank(user1);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user1));
+        migration.pause();
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_NonOwnerUnpauses() public {
+        migration.pause(); // Owner pauses
+
+        vm.startPrank(user1);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", user1));
+        migration.unpause();
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_MigratingWhilePaused() public {
+        uint256 amount = 100 * 1e18;
+
+        // Setup approval
+        vm.startPrank(user1);
+        unaiV1.approve(address(migration), amount);
+
+        // Pause migration
+        vm.stopPrank();
+        migration.pause();
+
+        // Try to migrate while paused
+        vm.startPrank(user1);
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
+        migration.migrateTokens(amount);
+        vm.stopPrank();
+    }
+
+    function testWithdrawWhilePaused() public {
+        uint256 amount = 100 * 1e18;
+
+        // First do a migration to get some V1 tokens in the contract
+        vm.startPrank(user1);
+        unaiV1.approve(address(migration), amount);
+        migration.migrateTokens(amount);
+        vm.stopPrank();
+
+        // Pause the contract
+        migration.pause();
+
+        // Owner should still be able to withdraw while paused
+        uint256 initialOwnerV1Balance = unaiV1.balanceOf(owner);
+        migration.withdrawV1Tokens(amount);
+
+        assertEq(
+            unaiV1.balanceOf(owner),
+            initialOwnerV1Balance + amount,
+            "Owner V1 balance not increased while paused"
+        );
+    }
+
     function testReentrancyProtection() public {
         // Deploy malicious token that tries to reenter
         MaliciousToken maliciousV1 = new MaliciousToken();
