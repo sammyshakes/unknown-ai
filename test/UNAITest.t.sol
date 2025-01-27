@@ -2,30 +2,63 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
-import {Contract, IDexRouter} from "../src/UNAI.sol";
-import {StakingVault, IERC20} from "../src/UNAIStaking.sol";
+import {Contract} from "../src/UNAI.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+interface IDexRouter {
+    function factory() external pure returns (address);
+    function WETH() external pure returns (address);
+
+    function swapExactTokensForETHSupportingFeeOnTransferTokens(
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external;
+
+    function swapExactETHForTokensSupportingFeeOnTransferTokens(
+        uint256 amountOutMin,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external payable;
+
+    function addLiquidityETH(
+        address token,
+        uint256 amountTokenDesired,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
+        address to,
+        uint256 deadline
+    ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
+}
+
+interface IUniswapV2Factory {
+    function createPair(address tokenA, address tokenB) external returns (address pair);
+}
 
 contract UNAITest is Test {
     Contract public unaiToken;
-    StakingVault public stakingVault;
     address public router = address(0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008); // Sepolia
 
     IDexRouter dexRouter = IDexRouter(router);
+    IUniswapV2Factory uniswapFactory = IUniswapV2Factory(dexRouter.factory());
 
     // Setup users
     address public owner = address(this);
     address public user1 = address(0x1);
     address public user2 = address(0x2);
 
+    address public operationsAddress = address(0x3);
+    address public devAddress = address(0x4);
+
     function setUp() public {
         // Deploy the UNAI token contract
-        unaiToken = new Contract();
-        stakingVault = new StakingVault(address(unaiToken));
-        unaiToken.setStakingContract(address(stakingVault));
+        unaiToken = new Contract(operationsAddress, devAddress);
 
-        // Enable staking swap
-        unaiToken.setSwapStakingEnabled(true);
+        // Create LP Pair
+        address lpPair = uniswapFactory.createPair(address(unaiToken), dexRouter.WETH());
 
         // Provide liquidity to the pool
         uint256 ethAmount = 10 ether;
@@ -34,20 +67,224 @@ contract UNAITest is Test {
         // Deal some ETH to the owner
         vm.deal(owner, ethAmount);
 
-        unaiToken.approve(address(dexRouter), tokenAmount);
+        require(unaiToken.balanceOf(address(this)) >= tokenAmount, "Insufficient token balance");
+        unaiToken.approve(address(dexRouter), type(uint256).max);
 
         dexRouter.addLiquidityETH{value: 1 ether}(
             address(unaiToken), tokenAmount, 0, 0, owner, block.timestamp
         );
 
-        // Enable trading
-        unaiToken.enableTrading(1);
-
-        // Remove limits to test unrestricted buys and sells
-        unaiToken.removeLimits();
+        unaiToken.setLpPair(lpPair);
 
         // Roll the block to the future
         vm.roll(block.number + 2);
+    }
+
+    function testTransfer() public {
+        // Transfer some tokens from owner to user1
+        uint256 amount = 1_000_000 * 1e18;
+        unaiToken.transfer(user1, amount);
+
+        // Check the balance of user1
+        assertEq(unaiToken.balanceOf(user1), amount);
+    }
+
+    function testBuyFees() public {
+        uint256 ethAmount = 1 ether;
+
+        buyTokens(user1, ethAmount);
+
+        // Check fee accumulation
+        uint256 opsTokens = unaiToken.tokensForOperations();
+        uint256 devTokens = unaiToken.tokensForDev();
+
+        assertGt(opsTokens, 0, "Ops fees not collected");
+        assertGt(devTokens, 0, "Dev fees not collected");
+
+        // Calculate expected fee ratio (3:1 for ops:dev)
+        uint256 buyOpsFee = unaiToken.buyOperationsFee();
+        uint256 buyDevFee = unaiToken.buyDevFee();
+
+        // Allow for 2 wei rounding difference
+        uint256 expectedOpsRatio = buyOpsFee * devTokens;
+        uint256 expectedDevRatio = buyDevFee * opsTokens;
+        assertApproxEqAbs(expectedOpsRatio, expectedDevRatio, 2, "Fee ratio mismatch");
+    }
+
+    function testSellFees() public {
+        // First buy some tokens
+        buyTokens(user1, 1 ether);
+        uint256 userBalance = unaiToken.balanceOf(user1);
+
+        vm.startPrank(user1);
+        unaiToken.approve(address(dexRouter), userBalance);
+
+        sellTokens(user1, userBalance);
+
+        assertGt(unaiToken.tokensForOperations(), 0, "Ops fees not collected on sell");
+        assertGt(unaiToken.tokensForDev(), 0, "Dev fees not collected on sell");
+    }
+
+    function testFeeDistribution() public {
+        // First do multiple buys to accumulate fees
+        buyTokens(user1, 2 ether);
+        buyTokens(user2, 2 ether);
+
+        // Get initial ETH balances
+        uint256 initialOpsEth = operationsAddress.balance;
+        uint256 initialDevEth = devAddress.balance;
+
+        // Force swap with minimum threshold
+        vm.startPrank(owner);
+        unaiToken.setSwapTokensAtAmount(1); // Set to minimum to trigger swap
+        vm.stopPrank();
+
+        // Sell tokens to trigger the swap
+        uint256 userBalance = unaiToken.balanceOf(user1);
+        vm.startPrank(user1);
+        unaiToken.approve(address(dexRouter), userBalance);
+        sellTokens(user1, userBalance / 2); // Sell half the tokens
+        vm.stopPrank();
+
+        // Wait for a block to ensure ETH transfers are processed
+        vm.roll(block.number + 1);
+
+        // Verify ETH distributions
+        uint256 finalOpsEth = operationsAddress.balance;
+        uint256 finalDevEth = devAddress.balance;
+
+        // Check that both addresses received ETH
+        uint256 opsEthReceived = finalOpsEth - initialOpsEth;
+        uint256 devEthReceived = finalDevEth - initialDevEth;
+
+        assertGt(opsEthReceived, 0, "No ETH sent to ops");
+        assertGt(devEthReceived, 0, "No ETH sent to dev");
+
+        // Verify fee ratio (3:1)
+        // Allow for 5 wei rounding difference due to division and price impact
+        uint256 expectedOpsRatio = 3 * devEthReceived;
+        uint256 expectedDevRatio = 1 * opsEthReceived;
+        assertApproxEqAbs(expectedOpsRatio, expectedDevRatio, 5, "ETH ratio mismatch");
+    }
+
+    function testOnlyOwnerCanUpdateFees() public {
+        vm.startPrank(user1);
+        vm.expectRevert();
+        unaiToken.updateBuyFees(2, 2);
+        vm.expectRevert();
+        unaiToken.updateSellFees(2, 2);
+        vm.stopPrank();
+    }
+
+    function testFeeUpdates() public {
+        uint256 newBuyOps = 2;
+        uint256 newBuyDev = 2;
+        uint256 newSellOps = 4;
+        uint256 newSellDev = 1;
+
+        vm.startPrank(owner);
+        unaiToken.updateBuyFees(newBuyOps, newBuyDev);
+        unaiToken.updateSellFees(newSellOps, newSellDev);
+        vm.stopPrank();
+
+        assertEq(unaiToken.buyOperationsFee(), newBuyOps, "Buy ops fee not updated");
+        assertEq(unaiToken.buyDevFee(), newBuyDev, "Buy dev fee not updated");
+        assertEq(unaiToken.sellOperationsFee(), newSellOps, "Sell ops fee not updated");
+        assertEq(unaiToken.sellDevFee(), newSellDev, "Sell dev fee not updated");
+    }
+
+    function testPreventInvalidFeeUpdates() public {
+        vm.startPrank(owner);
+        vm.expectRevert("Buy fees cannot exceed 10%");
+        unaiToken.updateBuyFees(8, 3); // 11% total
+
+        vm.expectRevert("Sell fees cannot exceed 10%");
+        unaiToken.updateSellFees(9, 2); // 11% total
+        vm.stopPrank();
+    }
+
+    function testAddressUpdates() public {
+        address newOps = address(0x5);
+        address newDev = address(0x6);
+
+        vm.startPrank(owner);
+        unaiToken.updateOperationsAddress(newOps);
+        unaiToken.updateDevAddress(newDev);
+        vm.stopPrank();
+
+        assertEq(unaiToken.operationsAddress(), newOps, "Ops address not updated");
+        assertEq(unaiToken.devAddress(), newDev, "Dev address not updated");
+    }
+
+    function testSwapThreshold() public {
+        uint256 newThreshold = 100_000 * 1e18;
+
+        vm.startPrank(owner);
+        unaiToken.setSwapTokensAtAmount(newThreshold);
+        vm.stopPrank();
+
+        assertEq(unaiToken.swapTokensAtAmount(), newThreshold, "Swap threshold not updated");
+    }
+
+    function testSwapEnabled() public {
+        // First accumulate some fees
+        buyTokens(user1, 1 ether);
+
+        // Disable swapping
+        vm.startPrank(owner);
+        unaiToken.setSwapEnabled(false);
+        unaiToken.setSwapTokensAtAmount(1); // Set low threshold
+        vm.stopPrank();
+
+        // Try to sell - should not trigger swap
+        uint256 userBalance = unaiToken.balanceOf(user1);
+        uint256 initialOpsEth = operationsAddress.balance;
+        uint256 initialDevEth = devAddress.balance;
+
+        vm.startPrank(user1);
+        unaiToken.approve(address(dexRouter), userBalance);
+        sellTokens(user1, userBalance / 2);
+        vm.stopPrank();
+
+        // Verify no ETH was distributed
+        assertEq(
+            operationsAddress.balance, initialOpsEth, "Ops received ETH when swapping disabled"
+        );
+        assertEq(devAddress.balance, initialDevEth, "Dev received ETH when swapping disabled");
+    }
+
+    function testContractExcludedFromFees() public {
+        // First buy some tokens to accumulate fees
+        buyTokens(user1, 1 ether);
+
+        // Get initial fee counters
+        uint256 initialOpsTokens = unaiToken.tokensForOperations();
+        uint256 initialDevTokens = unaiToken.tokensForDev();
+
+        // Transfer tokens to user2 from contract
+        uint256 amount = 1_000_000 * 1e18;
+        vm.startPrank(owner);
+        unaiToken.transfer(address(unaiToken), amount);
+        vm.stopPrank();
+
+        // Contract sends tokens to user2
+        vm.prank(owner);
+        unaiToken.transfer(user2, amount);
+
+        // Verify no additional fees were taken
+        assertEq(
+            unaiToken.tokensForOperations(), initialOpsTokens, "Ops fees collected from contract"
+        );
+        assertEq(unaiToken.tokensForDev(), initialDevTokens, "Dev fees collected from contract");
+        assertEq(unaiToken.balanceOf(user2), amount, "Fees taken when contract sent tokens");
+    }
+
+    function testConstructorZeroAddressValidation() public {
+        vm.expectRevert("Ops address cannot be zero");
+        new Contract(address(0), devAddress);
+
+        vm.expectRevert("Dev address cannot be zero");
+        new Contract(operationsAddress, address(0));
     }
 
     // Helper function to simulate token purchase
@@ -90,220 +327,4 @@ contract UNAITest is Test {
         );
         vm.stopPrank();
     }
-
-    function test_StakingRewardsFeeOnSell() public {
-        // Disable swapBack
-        unaiToken.setSwapEnabled(false);
-
-        uint256 sellAmount = 1000 * 1e18;
-
-        // User1 buys tokens
-        buyTokens(user1, 1 ether);
-        uint256 initialBalanceUser1 = unaiToken.balanceOf(user1);
-        assertGt(initialBalanceUser1, 0, "User1 should have some tokens after buying");
-
-        // Get initial contract balances before sell
-        uint256 initialStakingRewardsTokens = unaiToken.tokensForStaking();
-        uint256 initialContractBalance = unaiToken.balanceOf(address(unaiToken));
-
-        // Add logging to check initial balances
-        console.log("Initial contract token balance:", initialContractBalance);
-        console.log("Initial staking rewards tokens:", initialStakingRewardsTokens);
-
-        // Simulate a sell transaction and ensure fees are applied
-        sellTokens(user1, sellAmount);
-
-        // Check that the contract's token balance has increased due to fees
-        uint256 finalContractBalance = unaiToken.balanceOf(address(unaiToken));
-        uint256 finalStakingRewardsTokens = unaiToken.tokensForStaking();
-
-        // Log final balances after the sell
-        console.log("Final contract token balance:", finalContractBalance);
-        console.log("Final staking rewards tokens:", finalStakingRewardsTokens);
-
-        // Check that the contract's token balance increased
-        assertGt(
-            finalContractBalance,
-            initialContractBalance,
-            "Contract should have more tokens after sell due to fees"
-        );
-
-        // Check that the staking rewards tokens have increased
-        assertGt(
-            finalStakingRewardsTokens,
-            initialStakingRewardsTokens,
-            "Staking rewards tokens should increase after sell"
-        );
-
-        // Corrected fee calculation
-        uint256 expectedStakingFee = sellAmount * unaiToken.sellStakingRewardsFee() / 100;
-
-        console.log("Expected staking rewards fee:", expectedStakingFee);
-        console.log(
-            "Actual staking rewards fee:", finalStakingRewardsTokens - initialStakingRewardsTokens
-        );
-
-        assertEq(
-            finalStakingRewardsTokens - initialStakingRewardsTokens,
-            expectedStakingFee,
-            "Staking rewards fee should be deducted correctly"
-        );
-    }
-
-    function test_StakingRewardsDistribution() public {
-        uint256 sellAmount = 1000 * 1e18;
-
-        // Lower the swap threshold to allow the swap to happen
-        unaiToken.updateSwapTokensAtAmount(1000 ether); // Set a lower threshold
-
-        // User1 buys tokens and then sells them
-        buyTokens(user1, 1 ether);
-        sellTokens(user1, sellAmount);
-
-        // Check that the contract has accumulated staking rewards tokens
-        uint256 stakingRewardsTokens = unaiToken.tokensForStaking();
-        assertGt(stakingRewardsTokens, 0, "Staking rewards tokens should accumulate after sell");
-
-        // Simulate swapping tokens for ETH (this would trigger reward distribution)
-        unaiToken.forceSwapBack();
-
-        // Check if staking rewards tokens are reset after distribution
-        uint256 finalStakingRewardsTokens = unaiToken.tokensForStaking();
-        assertEq(
-            finalStakingRewardsTokens,
-            0,
-            "Staking rewards tokens should be reset after distribution"
-        );
-    }
-
-    function test_UpdateSellStakingRewardsFee() public {
-        // Owner updates the staking rewards fee
-        uint256 newStakingRewardsFee = 3; // Change to 3%
-        unaiToken.updateSellFees(2, 1, 0, 0, newStakingRewardsFee);
-
-        // Check that the new sellStakingRewardsFee is correctly set
-        uint256 updatedStakingRewardsFee = unaiToken.sellStakingRewardsFee();
-        assertEq(
-            updatedStakingRewardsFee,
-            newStakingRewardsFee,
-            "The sellStakingRewardsFee should be updated to 3%"
-        );
-    }
-
-    // function test_SellWithUpdatedStakingRewardsFee() public {
-    //     // Owner updates the staking rewards fee to 4%
-    //     uint256 newStakingRewardsFee = 4;
-    //     unaiToken.updateSellFees(2, 1, 0, 0, newStakingRewardsFee);
-
-    //     uint256 sellAmount = 1000 * 1e18;
-
-    //     // User1 buys tokens and then sells them
-    //     buyTokens(user1, 1 ether);
-    //     uint256 initialStakingRewardsTokens = unaiToken.tokensForStaking();
-
-    //     // Add logging to debug fee calculation
-    //     uint256 sellTotalFees = unaiToken.sellTotalFees();
-    //     uint256 stakingRewardsFee = unaiToken.sellStakingRewardsFee();
-
-    //     console.log("Sell amount:", sellAmount);
-    //     console.log("Sell total fees:", sellTotalFees);
-    //     console.log("Staking rewards fee:", stakingRewardsFee);
-    //     assertTrue(sellTotalFees > 0, "Sell total fees should be greater than 0");
-
-    //     // Simulate a sell
-    //     sellTokens(user1, sellAmount);
-
-    //     // Check that the staking rewards tokens have increased correctly
-    //     uint256 finalStakingRewardsTokens = unaiToken.tokensForStaking();
-    //     uint256 expectedStakingFee = sellAmount * stakingRewardsFee / 100;
-    //     assertEq(
-    //         finalStakingRewardsTokens - initialStakingRewardsTokens,
-    //         expectedStakingFee,
-    //         "Staking rewards tokens should increase according to the updated fee"
-    //     );
-    // }
-
-    function test_StakingRewardsAccumulateWithoutSwap() public {
-        // Initially set swapStakingEnabled to false
-        unaiToken.setSwapStakingEnabled(false);
-
-        // Set a lower swap threshold to easily trigger the swap
-        unaiToken.updateSwapTokensAtAmount(1000 ether);
-
-        uint256 sellAmount = 1000 ether;
-
-        // User1 buys tokens and then sells them
-        buyTokens(user1, 1 ether);
-        uint256 initialStakingRewardsTokens = unaiToken.tokensForStaking();
-        uint256 initialContractEthBalance = address(unaiToken).balance;
-
-        // Perform a token sale
-        sellTokens(user1, sellAmount);
-
-        // Check that staking rewards tokens have accumulated
-        uint256 finalStakingRewardsTokens = unaiToken.tokensForStaking();
-        assertGt(
-            finalStakingRewardsTokens,
-            initialStakingRewardsTokens,
-            "Staking rewards tokens should accumulate after the sell"
-        );
-
-        // Track the staking reward ETH balance before and after swap
-        uint256 stakingEthBalanceBeforeSwap = address(stakingVault).balance;
-
-        // Simulate forceSwapBack to check if staking rewards are distributed
-        unaiToken.forceSwapBack();
-
-        // Check the staking contract's ETH balance (it should remain unchanged)
-        uint256 stakingEthBalanceAfterSwap = address(stakingVault).balance;
-        assertEq(
-            stakingEthBalanceBeforeSwap,
-            stakingEthBalanceAfterSwap,
-            "Staking contract ETH balance should not increase because staking swap is disabled"
-        );
-
-        // Verify staking rewards tokens were not swapped out
-        assertGt(
-            unaiToken.tokensForStaking(),
-            0,
-            "Staking rewards tokens should still be present because no swap occurred"
-        );
-    }
-
-    // function test_StakingRewardsSwapWhenEnabled() public {
-    //     // Set a lower swap threshold to easily trigger the swap
-    //     unaiToken.updateSwapTokensAtAmount(1000 ether);
-
-    //     uint256 sellAmount = 1000 ether;
-
-    //     // User1 buys tokens and then sells them
-    //     buyTokens(user1, 1 ether);
-    //     uint256 initialStakingRewardsTokens = unaiToken.tokensForStaking();
-    //     uint256 initialContractEthBalance = address(unaiToken).balance;
-
-    //     // Perform a token sale
-    //     sellTokens(user1, sellAmount);
-
-    //     // Check that staking rewards tokens have accumulated
-    //     uint256 finalStakingRewardsTokens = unaiToken.tokensForStaking();
-    //     assertGt(
-    //         finalStakingRewardsTokens,
-    //         initialStakingRewardsTokens,
-    //         "Staking rewards tokens should accumulate after the sell"
-    //     );
-
-    //     // Simulate forceSwapBack to trigger the swap
-    //     unaiToken.forceSwapBack();
-
-    //     // Check that ETH balance of contract increased due to staking rewards swap
-    //     uint256 finalContractEthBalance = address(unaiToken).balance;
-    //     assertGt(
-    //         finalContractEthBalance,
-    //         initialContractEthBalance,
-    //         "Contract ETH balance should increase because staking swap is enabled"
-    //     );
-
-    //     // Verify staking rewards tokens were swapped out
-    //     assertEq(unaiToken.tokensForStaking(), 0, "Staking rewards tokens should be swapped out");
-    // }
 }
